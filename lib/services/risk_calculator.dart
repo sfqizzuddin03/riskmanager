@@ -148,4 +148,34 @@ class RiskCalculator {
     // Average the TR values
     return trValues.reduce((a, b) => a + b) / trValues.length;
   }
+
+  // 7. GET LIVE PRICE & CHANGE (Needed for Watchlist)
+  static Future<Map<String, double>> getStockDetails(String symbol) async {
+    try {
+      // Fetch 1-day data to get the metadata
+      final url = 'https://query1.finance.yahoo.com/v8/finance/chart/$symbol?interval=1d&range=1d';
+      final response = await http.get(Uri.parse(url));
+      
+      if (response.statusCode == 200) {
+        final json = jsonDecode(response.body);
+        final meta = json['chart']['result'][0]['meta'];
+        
+        // Extract exact price data
+        final currentPrice = (meta['regularMarketPrice'] as num).toDouble();
+        final prevClose = (meta['chartPreviousClose'] as num).toDouble();
+        
+        final changeAmount = currentPrice - prevClose;
+        final changePercent = (changeAmount / prevClose) * 100;
+
+        return {
+          'price': currentPrice,
+          'change': changeAmount,
+          'percent': changePercent
+        };
+      }
+    } catch (e) {
+      print("Error fetching price for $symbol: $e");
+    }
+    return {}; 
+  }
 }
