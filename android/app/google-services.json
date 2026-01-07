@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "965268276316",
+    "project_id": "riskmanager-bac02",
+    "storage_bucket": "riskmanager-bac02.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:965268276316:android:9d2b0c1861c8d9574ed299",
+        "android_client_info": {
+          "package_name": "com.example.stock_tracker_fyp"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDExTFPUiX1HgnYQfpQ3q8qErVOvyue6eo"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
