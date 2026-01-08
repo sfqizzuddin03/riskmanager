@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
-import '../services/auth_service.dart';
-import 'setup_profile_screen.dart';
-import 'main_screen.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -11,176 +9,197 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  final TextEditingController _emailController = TextEditingController();
-  final TextEditingController _passwordController = TextEditingController();
-  final TextEditingController _initialCapitalController = TextEditingController();
-  final AuthService _auth = AuthService();
-  
-  bool _isLogin = true;
+  final _emailController = TextEditingController();
+  final _passwordController = TextEditingController();
+  bool _isLogin = true; // Toggle between Login and Sign Up
   bool _isLoading = false;
 
- void _submitForm() async {
-    final email = _emailController.text.trim();
-    final password = _passwordController.text;
-    final capital = _initialCapitalController.text;
-
-    if (email.isEmpty || password.isEmpty) {
-      _showErrorDialog('Please fill in all fields');
-      return;
-    }
-
-    if (!_isLogin && capital.isEmpty) {
-      _showErrorDialog('Please enter initial capital');
-      return;
-    }
-
-    setState(() {
-      _isLoading = true;
-    });
-
+  // --- AUTH LOGIC ---
+  Future<void> _submitAuth() async {
+    setState(() => _isLoading = true);
     try {
       if (_isLogin) {
-        // CASE A: User is Logging In
-        await _auth.signIn(email, password);
+        // Log In
+        await FirebaseAuth.instance.signInWithEmailAndPassword(
+          email: _emailController.text.trim(),
+          password: _passwordController.text.trim(),
+        );
       } else {
-        // CASE B: User is Registering (New Account)
-        final initialCapital = double.tryParse(capital) ?? 10000.0;
-        await _auth.register(email, password, initialCapital);
+        // Sign Up
+        await FirebaseAuth.instance.createUserWithEmailAndPassword(
+          email: _emailController.text.trim(),
+          password: _passwordController.text.trim(),
+        );
       }
-
-      if (_auth.isLoggedIn) {
-        // FIXED: Removed Provider loading logic. 
-        // The PositionManagementScreen will fetch its own data when opened.
-
-        if (!_isLogin) {
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(builder: (context) => const SetupProfileScreen()),
-          );
-        } else {
-          Navigator.pushReplacement(
-            context,
-            // Pass empty list, the MainScreen handles data now
-            MaterialPageRoute(builder: (context) => const MainScreen(selectedStocks: [])), 
-          );
-        }
+      // No need to navigate manually; main.dart StreamBuilder handles it!
+    } on FirebaseAuthException catch (e) {
+      String message = "An error occurred.";
+      if (e.code == 'user-not-found') message = "No user found for that email.";
+      else if (e.code == 'wrong-password') message = "Wrong password.";
+      else if (e.code == 'email-already-in-use') message = "Email already registered.";
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(message), backgroundColor: Colors.redAccent),
+        );
       }
     } catch (e) {
-      _showErrorDialog(e.toString().replaceFirst('Exception: ', ''));
+      print(e);
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
-
-    setState(() {
-      _isLoading = false;
-    });
-  }
-
-  void _showErrorDialog(String message) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Error'),
-        content: Text(message),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('OK'),
-          ),
-        ],
-      ),
-    );
   }
 
   @override
   Widget build(BuildContext context) {
+    // Professional Finance Colors
+    final primaryColor = Colors.blueGrey.shade900;
+    final accentColor = Colors.blueAccent.shade200;
+
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Risk Manager Pro'),
-        backgroundColor: Colors.blue,
-        foregroundColor: Colors.white,
-      ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : Padding(
-              padding: const EdgeInsets.all(20.0),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    Icons.account_balance_wallet,
-                    size: 64,
-                    color: Colors.blue.shade700,
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [Colors.blueGrey.shade900, Colors.black],
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+          ),
+        ),
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24.0),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                // --- 1. LOGO & BRANDING ---
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.1),
+                    shape: BoxShape.circle,
                   ),
-                  const SizedBox(height: 20),
-                  Text(
-                    _isLogin ? 'Welcome Back' : 'Create Account',
-                    style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+                  child: Icon(Icons.show_chart, size: 60, color: accentColor),
+                ),
+                const SizedBox(height: 20),
+                const Text(
+                  "INVESTIVE",
+                  style: TextStyle(
+                    fontSize: 32,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 3,
+                    color: Colors.white,
                   ),
-                  const SizedBox(height: 30),
-                  
-                  TextField(
-                    controller: _emailController,
-                    decoration: const InputDecoration(
-                      labelText: 'Email',
-                      border: OutlineInputBorder(),
-                      prefixIcon: Icon(Icons.email),
-                    ),
-                    keyboardType: TextInputType.emailAddress,
+                ),
+                Text(
+                  "Intelligent Risk Management",
+                  style: TextStyle(color: Colors.grey.shade400, fontSize: 14),
+                ),
+                const SizedBox(height: 50),
+
+                // --- 2. INPUT CARD ---
+                Container(
+                  padding: const EdgeInsets.all(30),
+                  decoration: BoxDecoration(
+                    color: Colors.white, // Clean white card for contrast
+                    borderRadius: BorderRadius.circular(20),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.3),
+                        blurRadius: 15,
+                        offset: const Offset(0, 10),
+                      )
+                    ],
                   ),
-                  const SizedBox(height: 15),
-                  
-                  TextField(
-                    controller: _passwordController,
-                    obscureText: true,
-                    decoration: const InputDecoration(
-                      labelText: 'Password',
-                      border: OutlineInputBorder(),
-                      prefixIcon: Icon(Icons.lock),
-                    ),
-                  ),
-                  const SizedBox(height: 15),
-                  
-                  if (!_isLogin) ...[
-                    TextField(
-                      controller: _initialCapitalController,
-                      keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(
-                        labelText: 'Initial Capital (\$)',
-                        border: OutlineInputBorder(),
-                        prefixIcon: Icon(Icons.attach_money),
+                  child: Column(
+                    children: [
+                      Text(
+                        _isLogin ? "Welcome Back" : "Create Account",
+                        style: TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.bold,
+                          color: primaryColor,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 15),
-                  ],
-                  
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      onPressed: _isLoading ? null : _submitForm,
-                      style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 15),
-                        backgroundColor: Colors.blue,
-                        foregroundColor: Colors.white,
+                      const SizedBox(height: 25),
+                      
+                      // Email Field
+                      TextField(
+                        controller: _emailController,
+                        keyboardType: TextInputType.emailAddress,
+                        decoration: InputDecoration(
+                          labelText: "Email Address",
+                          prefixIcon: Icon(Icons.email_outlined, color: primaryColor),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                          focusedBorder: OutlineInputBorder(
+                            borderSide: BorderSide(color: primaryColor, width: 2),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
                       ),
-                      child: Text(_isLogin ? 'Login' : 'Register'),
+                      const SizedBox(height: 15),
+
+                      // Password Field
+                      TextField(
+                        controller: _passwordController,
+                        obscureText: true,
+                        decoration: InputDecoration(
+                          labelText: "Password",
+                          prefixIcon: Icon(Icons.lock_outline, color: primaryColor),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                          focusedBorder: OutlineInputBorder(
+                            borderSide: BorderSide(color: primaryColor, width: 2),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 25),
+
+                      // Submit Button
+                      SizedBox(
+                        width: double.infinity,
+                        height: 50,
+                        child: ElevatedButton(
+                          onPressed: _isLoading ? null : _submitAuth,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: primaryColor,
+                            foregroundColor: Colors.white,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            elevation: 2,
+                          ),
+                          child: _isLoading
+                              ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.white))
+                              : Text(
+                                  _isLogin ? "LOGIN" : "SIGN UP",
+                                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                                ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+                // --- 3. TOGGLE BUTTON ---
+                const SizedBox(height: 20),
+                TextButton(
+                  onPressed: () => setState(() => _isLogin = !_isLogin),
+                  child: RichText(
+                    text: TextSpan(
+                      text: _isLogin ? "Don't have an account? " : "Already have an account? ",
+                      style: TextStyle(color: Colors.grey.shade400),
+                      children: [
+                        TextSpan(
+                          text: _isLogin ? "Sign Up" : "Login",
+                          style: TextStyle(color: accentColor, fontWeight: FontWeight.bold),
+                        ),
+                      ],
                     ),
                   ),
-                  
-                  const SizedBox(height: 10),
-                  
-                  TextButton(
-                    onPressed: _isLoading ? null : () {
-                      setState(() {
-                        _isLogin = !_isLogin;
-                      });
-                    },
-                    child: Text(
-                      _isLogin ? 'Create new account' : 'Already have an account?',
-                      style: const TextStyle(color: Colors.blue),
-                    ),
-                  ),
-                ],
-              ),
+                ),
+              ],
             ),
+          ),
+        ),
+      ),
     );
   }
 }

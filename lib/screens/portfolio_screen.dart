@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../services/database_service.dart';
 import '../services/risk_calculator.dart';
-import 'position_management.dart'; 
+import 'position_management.dart';
 
 class PortfolioScreen extends StatefulWidget {
   const PortfolioScreen({super.key});
@@ -44,7 +44,7 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
       String symbol = item['symbol'];
       double shares = (item['shares'] as num).toDouble();
       
-      // Handle entryPrice (new) vs averagePrice (old compatibility)
+      // Normalize 'entryPrice' vs 'averagePrice'
       double cost = (item['entryPrice'] as num?)?.toDouble() ?? 
                     (item['averagePrice'] as num?)?.toDouble() ?? 0.0;
 
@@ -68,6 +68,99 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
     }
   }
 
+  // --- NEW: MANAGE POSITION DIALOG (Update & Delete) ---
+  void _showManageDialog(Map<String, dynamic> stock) {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    // Controllers pre-filled with current data
+    final sharesController = TextEditingController(text: stock['shares'].toString());
+    double currentCost = (stock['entryPrice'] as num?)?.toDouble() ?? 
+                         (stock['averagePrice'] as num?)?.toDouble() ?? 0.0;
+    final priceController = TextEditingController(text: currentCost.toString());
+
+    // Dark Mode colors for Dialog
+    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
+    final dialogBg = isDarkMode ? Colors.grey[900] : Colors.white;
+    final textColor = isDarkMode ? Colors.white : Colors.black;
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: dialogBg,
+        title: Text("Manage ${stock['symbol']}", style: TextStyle(color: textColor)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: sharesController,
+              keyboardType: TextInputType.number,
+              style: TextStyle(color: textColor),
+              decoration: InputDecoration(
+                labelText: "Shares Owned",
+                labelStyle: TextStyle(color: Colors.grey),
+                enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.blueGrey)),
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: priceController,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              style: TextStyle(color: textColor),
+              decoration: InputDecoration(
+                labelText: "Avg Buy Price (\$)",
+                labelStyle: TextStyle(color: Colors.grey),
+                enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.blueGrey)),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          // DELETE BUTTON
+          TextButton(
+            onPressed: () async {
+              // 1. Delete Logic
+              await DatabaseService.removeStockFromPortfolio(user.uid, stock);
+              Navigator.pop(context);
+              _loadPortfolioData(); // Refresh UI
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text("Position removed"), backgroundColor: Colors.red),
+              );
+            },
+            child: const Text("Delete", style: TextStyle(color: Colors.red)),
+          ),
+          
+          // UPDATE BUTTON
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.blueGrey),
+            onPressed: () async {
+              // 2. Update Logic (Remove Old -> Add New)
+              int newShares = int.tryParse(sharesController.text) ?? 0;
+              double newPrice = double.tryParse(priceController.text) ?? 0.0;
+
+              if (newShares > 0 && newPrice > 0) {
+                // Remove Old
+                await DatabaseService.removeStockFromPortfolio(user.uid, stock);
+                
+                // Add New
+                final newStock = Map<String, dynamic>.from(stock);
+                newStock['shares'] = newShares;
+                newStock['entryPrice'] = newPrice;
+                newStock['averagePrice'] = newPrice; // Keep sync
+                
+                await DatabaseService.addStockToPortfolio(user.uid, newStock);
+                
+                Navigator.pop(context);
+                _loadPortfolioData(); // Refresh UI
+              }
+            },
+            child: const Text("Update", style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _showGuide() {
     showDialog(
       context: context,
@@ -82,27 +175,22 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
              _GuideStep(icon: Icons.add_circle, text: "Tap 'Add / Manage' to buy assets."),
-             SizedBox(height: 10),
+             _GuideStep(icon: Icons.edit, text: "Tap any card to Edit or Delete it."),
              _GuideStep(icon: Icons.refresh, text: "Pull down to refresh live prices."),
-             SizedBox(height: 10),
-             _GuideStep(icon: Icons.trending_up, text: "Green = Profit. Red = Loss."),
           ],
         ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Got it!"))
-        ],
+        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text("Got it!"))],
       ),
     );
   }
 
-@override
+  @override
   Widget build(BuildContext context) {
     // 1. Detect Dark Mode
     final isDarkMode = Theme.of(context).brightness == Brightness.dark;
     
-    // 2. Define colors based on mode
-    // FIX: Added '!' to Colors.grey[...] to force them to be non-null
-    final Color bgColor = isDarkMode ? Colors.black : Colors.grey[100]!; 
+    // 2. Define colors
+    final Color bgColor = isDarkMode ? Colors.black : Colors.grey[100]!;
     final Color cardColor = isDarkMode ? Colors.grey[900]! : Colors.white;
     final Color textColor = isDarkMode ? Colors.white : Colors.black87;
     final Color subTextColor = isDarkMode ? Colors.white70 : Colors.black54;
@@ -150,7 +238,6 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
                               physics: const NeverScrollableScrollPhysics(),
                               itemCount: _portfolio.length,
                               itemBuilder: (context, index) {
-                                // Now this works because cardColor is definitely a Color (not Color?)
                                 return _buildStockCard(_portfolio[index], cardColor, textColor, subTextColor);
                               },
                             ),
@@ -237,7 +324,6 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
     );
   }
 
-  // UPDATED: Now accepts dynamic colors
   Widget _buildStockCard(Map<String, dynamic> stock, Color cardColor, Color textColor, Color subTextColor) {
     String symbol = stock['symbol'];
     double shares = (stock['shares'] as num).toDouble();
@@ -248,37 +334,39 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
     double value = currentPrice * shares;
     double gain = value - (cost * shares);
     
-    return Card(
-      color: cardColor, // Uses passed color
-      margin: const EdgeInsets.only(bottom: 12),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: ListTile(
-        leading: CircleAvatar(
-          backgroundColor: Colors.blueGrey.shade50,
-          child: Text(symbol[0], style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blueGrey.shade900)),
-        ),
-        title: Text(symbol, style: TextStyle(fontWeight: FontWeight.bold, color: textColor)),
-        subtitle: Text("$shares shares @ \$${cost.toStringAsFixed(2)}", style: TextStyle(color: subTextColor)),
-        trailing: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            Text("\$${value.toStringAsFixed(2)}", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: textColor)),
-            Text(
-              "${gain >= 0 ? '+' : ''}\$${gain.toStringAsFixed(2)}",
-              style: TextStyle(
-                color: gain >= 0 ? Colors.green : Colors.red,
-                fontSize: 12,
-                fontWeight: FontWeight.w500
+    return GestureDetector(
+      onTap: () => _showManageDialog(stock), // <--- TAP TO EDIT
+      child: Card(
+        color: cardColor, 
+        margin: const EdgeInsets.only(bottom: 12),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        child: ListTile(
+          leading: CircleAvatar(
+            backgroundColor: Colors.blueGrey.shade50,
+            child: Text(symbol[0], style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blueGrey.shade900)),
+          ),
+          title: Text(symbol, style: TextStyle(fontWeight: FontWeight.bold, color: textColor)),
+          subtitle: Text("$shares shares @ \$${cost.toStringAsFixed(2)}", style: TextStyle(color: subTextColor)),
+          trailing: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text("\$${value.toStringAsFixed(2)}", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: textColor)),
+              Text(
+                "${gain >= 0 ? '+' : ''}\$${gain.toStringAsFixed(2)}",
+                style: TextStyle(
+                  color: gain >= 0 ? Colors.green : Colors.red,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
   }
 
-  // UPDATED: Now accepts dynamic colors
   Widget _buildEmptyState(Color textColor) {
     return Center(
       child: Padding(
@@ -295,12 +383,10 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
   }
 }
 
-// Helper Widget for Guide
 class _GuideStep extends StatelessWidget {
   final IconData icon;
   final String text;
   const _GuideStep({required this.icon, required this.text});
-
   @override
   Widget build(BuildContext context) {
     return Row(

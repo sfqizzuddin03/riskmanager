@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import '../services/database_service.dart';
 import '../services/risk_calculator.dart';
-import 'trading_chart_screen.dart'; 
+import 'trading_chart_screen.dart'; // <--- CRITICAL IMPORT
 
 class WatchlistScreen extends StatefulWidget {
   const WatchlistScreen({super.key});
@@ -12,188 +12,253 @@ class WatchlistScreen extends StatefulWidget {
 }
 
 class _WatchlistScreenState extends State<WatchlistScreen> {
-  List<Map<String, dynamic>> _stockData = [];
+  List<Map<String, dynamic>> _watchlistData = [];
+  List<String> _rawSymbols = [];
   bool _isLoading = true;
-  int _realDataCount = 0;
 
   @override
   void initState() {
     super.initState();
-    _fetchWatchlistData();
+    _fetchWatchlist();
   }
 
-  Future<void> _fetchWatchlistData() async {
+  Future<void> _fetchWatchlist() async {
+    setState(() => _isLoading = true);
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
-    // 1. Get Symbols from Firestore
-    final doc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
-    if (!doc.exists) {
-      if (mounted) setState(() => _isLoading = false);
-      return;
-    }
+    final symbols = await DatabaseService.loadWatchlist(user.uid);
+    _rawSymbols = symbols;
 
-    final data = doc.data() as Map<String, dynamic>;
-    final watchlist = List<String>.from(data['watchlist'] ?? []);
-    
     List<Map<String, dynamic>> tempList = [];
-    int successCount = 0;
 
-    // 2. Fetch Live Data for each symbol
-    for (String symbol in watchlist) {
+    for (String symbol in symbols) {
       final details = await RiskCalculator.getStockDetails(symbol);
       
-      bool isReal = details.isNotEmpty;
-      if (isReal) successCount++;
-
       tempList.add({
         'symbol': symbol,
-        'name': 'Stock Equity', // Yahoo doesn't give names easily, so we use generic
         'price': details['price'] ?? 0.0,
-        'changePercent': details['percent'] ?? 0.0,
-        'isRealData': isReal,
+        'change': details['change'] ?? 0.0,
+        'percent': details['percent'] ?? 0.0,
+        'isReal': true, // Assuming RiskCalculator returns live data
       });
     }
 
     if (mounted) {
       setState(() {
-        _stockData = tempList;
-        _realDataCount = successCount;
+        _watchlistData = tempList;
         _isLoading = false;
       });
     }
   }
 
+  Future<void> _addSymbol(String symbol) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null || symbol.isEmpty) return;
+    if (_rawSymbols.contains(symbol.toUpperCase())) return;
+
+    setState(() => _isLoading = true);
+    _rawSymbols.add(symbol.toUpperCase());
+    await DatabaseService.saveWatchlist(user.uid, _rawSymbols);
+    await _fetchWatchlist();
+  }
+
+  Future<void> _removeSymbol(String symbol) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    _rawSymbols.remove(symbol);
+    await DatabaseService.saveWatchlist(user.uid, _rawSymbols);
+    
+    setState(() {
+      _watchlistData.removeWhere((item) => item['symbol'] == symbol);
+    });
+  }
+
+  void _showAddDialog() {
+    String inputSymbol = "";
+    // Dark mode logic for dialog
+    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
+    final dialogBg = isDarkMode ? Colors.grey[900] : Colors.white;
+    final textColor = isDarkMode ? Colors.white : Colors.black;
+    final hintColor = isDarkMode ? Colors.grey[500] : Colors.grey[400];
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: dialogBg,
+        title: Text("Add to Watchlist", style: TextStyle(color: textColor)),
+        content: TextField(
+          autofocus: true,
+          style: TextStyle(color: textColor),
+          decoration: InputDecoration(
+            hintText: "e.g. NVDA",
+            hintStyle: TextStyle(color: hintColor),
+            enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.blueGrey)),
+          ),
+          onChanged: (val) => inputSymbol = val,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("Cancel"),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.blueGrey),
+            onPressed: () {
+              Navigator.pop(context);
+              if (inputSymbol.isNotEmpty) _addSymbol(inputSymbol);
+            },
+            child: const Text("Add", style: TextStyle(color: Colors.white)),
+          )
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    if (_isLoading) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
-    }
-
-    if (_stockData.isEmpty) {
-      return const Scaffold(body: Center(child: Text("Watchlist is empty")));
-    }
+    // --- DARK MODE COLORS ---
+    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
+    
+    final Color bgColor = isDarkMode ? Colors.black : Colors.grey[100]!;
+    final Color cardColor = isDarkMode ? Colors.grey[900]! : Colors.white;
+    final Color textColor = isDarkMode ? Colors.white : Colors.black87;
+    final Color subTextColor = isDarkMode ? Colors.white70 : Colors.black54;
 
     return Scaffold(
+      backgroundColor: bgColor,
       appBar: AppBar(
-        title: const Text("My Watchlist"),
-        backgroundColor: Colors.purple.shade800,
-        foregroundColor: Colors.white,
+        title: Text("Market Watch", style: TextStyle(fontWeight: FontWeight.bold, color: textColor)),
+        backgroundColor: cardColor,
+        elevation: 0,
+        iconTheme: IconThemeData(color: textColor),
+        actions: [
+          IconButton(
+            icon: Icon(Icons.add, color: textColor),
+            onPressed: _showAddDialog,
+            tooltip: "Add Stock",
+          ),
+        ],
       ),
-      body: Column(
-        children: [
-          // --- HEADER SHOWING DATA STATUS (From your code) ---
-          Container(
-            padding: const EdgeInsets.all(12),
-            color: _realDataCount > 0 ? Colors.green[50] : Colors.orange[50],
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(
-                  _realDataCount > 0 ? Icons.wifi : Icons.signal_wifi_off,
-                  color: _realDataCount > 0 ? Colors.green : Colors.orange,
-                  size: 16,
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  _realDataCount > 0 
-                    ? 'LIVE DATA: $_realDataCount/${_stockData.length} stocks'
-                    : 'DEMO DATA: Check internet connection',
-                  style: TextStyle(
-                    color: _realDataCount > 0 ? Colors.green : Colors.orange,
-                    fontWeight: FontWeight.bold,
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : _watchlistData.isEmpty
+              ? _buildEmptyState(textColor)
+              : RefreshIndicator(
+                  onRefresh: _fetchWatchlist,
+                  child: ListView.builder(
+                    itemCount: _watchlistData.length,
+                    padding: const EdgeInsets.all(16),
+                    itemBuilder: (context, index) {
+                      final stock = _watchlistData[index];
+                      return _buildWatchlistCard(stock, cardColor, textColor, subTextColor);
+                    },
                   ),
                 ),
-              ],
-            ),
+    );
+  }
+
+  Widget _buildWatchlistCard(Map<String, dynamic> stock, Color cardColor, Color textColor, Color subTextColor) {
+    String symbol = stock['symbol'];
+    double price = stock['price'];
+    double percent = stock['percent'];
+    bool isPositive = percent >= 0;
+
+    return Dismissible(
+      key: Key(symbol),
+      direction: DismissDirection.endToStart,
+      background: Container(
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.only(right: 20),
+        margin: const EdgeInsets.only(bottom: 12),
+        decoration: BoxDecoration(color: Colors.red, borderRadius: BorderRadius.circular(12)),
+        child: const Icon(Icons.delete, color: Colors.white),
+      ),
+      onDismissed: (_) => _removeSymbol(symbol),
+      child: Card(
+        color: cardColor,
+        elevation: 0,
+        margin: const EdgeInsets.only(bottom: 12),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        child: ListTile(
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          
+          // --- 1. LEFT: SYMBOL & LIVE BADGE ---
+          leading: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Colors.green.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: const Text("LIVE", style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: Colors.green)),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                symbol.substring(0, 1), 
+                style: TextStyle(fontWeight: FontWeight.bold, color: textColor, fontSize: 16)
+              ),
+            ],
+          ),
+
+          // --- 2. MIDDLE: NAME ---
+          title: Text(symbol, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: textColor)),
+          subtitle: Text("Real-time Data", style: TextStyle(fontSize: 10, color: subTextColor)),
+
+          // --- 3. RIGHT: PRICE ---
+          trailing: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text("\$${price.toStringAsFixed(2)}", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: textColor)),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    isPositive ? Icons.arrow_upward : Icons.arrow_downward,
+                    color: isPositive ? Colors.green : Colors.red,
+                    size: 12,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    "${percent.toStringAsFixed(2)}%",
+                    style: TextStyle(
+                      color: isPositive ? Colors.green : Colors.red,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+            ],
           ),
           
-          // --- STOCK LIST ---
-          Expanded(
-            child: ListView.builder(
-              itemCount: _stockData.length,
-              itemBuilder: (context, index) {
-                final stock = _stockData[index];
-                
-                final changePercent = stock['changePercent'] as double;
-                final isPositive = changePercent >= 0;
-                final isRealData = stock['isRealData'] as bool;
-                final price = stock['price'] as double;
-                final symbol = stock['symbol'] as String;
-                
-                return Card(
-                  margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  child: ListTile(
-                    leading: CircleAvatar(
-                      backgroundColor: isPositive ? Colors.green.shade100 : Colors.red.shade100,
-                      child: Text(
-                        symbol.length > 2 ? symbol.substring(0, 2) : symbol,
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          color: isPositive ? Colors.green : Colors.red,
-                        ),
-                      ),
-                    ),
-                    title: Row(
-                      children: [
-                        Text(
-                          symbol,
-                          style: const TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                        const SizedBox(width: 6),
-                        if (isRealData) 
-                          const Icon(Icons.wifi, size: 14, color: Colors.green),
-                        if (!isRealData)
-                          const Icon(Icons.computer, size: 14, color: Colors.orange),
-                      ],
-                    ),
-                    subtitle: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(stock['name']),
-                        Text(
-                          isRealData ? 'Live Market Data' : 'Demo Data',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: isRealData ? Colors.green : Colors.orange,
-                          ),
-                        ),
-                      ],
-                    ),
-                    trailing: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        Text(
-                          '\$${price.toStringAsFixed(2)}',
-                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                        ),
-                        Text(
-                          '${isPositive ? '+' : ''}${changePercent.toStringAsFixed(2)}%',
-                          style: TextStyle(
-                            color: isPositive ? Colors.green : Colors.red,
-                            fontWeight: FontWeight.bold
-                          ),
-                        ),
-                      ],
-                    ),
-                    
-                    // --- NAVIGATION TO TRADINGVIEW ---
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => TradingChartScreen(
-                            symbol: symbol,
-                          ),
-                        ),
-                      );
-                    },
-                  ), 
-                ); 
-              },
-            ),
-          ),
+          // --- 4. TAP TO OPEN CHART (RESTORED) ---
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => TradingChartScreen(symbol: symbol),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEmptyState(Color textColor) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.visibility_off_outlined, size: 60, color: Colors.grey),
+          const SizedBox(height: 20),
+          Text("Watchlist is empty", style: TextStyle(color: textColor, fontSize: 18)),
+          TextButton(onPressed: _showAddDialog, child: const Text("Add a stock to watch"))
         ],
       ),
     );
