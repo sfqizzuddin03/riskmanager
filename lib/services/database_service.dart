@@ -7,20 +7,31 @@ class DatabaseService {
   // ==============================================================================
   // 1. PORTFOLIO (The Money)
   // ==============================================================================
-  static Future<void> savePortfolio(String userId, List<Map<String, dynamic>> portfolio) async {
+  
+  // NEW: Add a single stock (Cleaner than doing it in the UI)
+  static Future<void> addStockToPortfolio(String userId, Map<String, dynamic> stockData) async {
     try {
-      final validItems = portfolio.where((item) => 
-        item['symbol'] != null && item['symbol'].toString().isNotEmpty
-      ).toList();
-
-      await _db.collection('users').doc(userId).set({
-        'portfolio': validItems,
-      }, SetOptions(merge: true));
+      await _db.collection('users').doc(userId).update({
+        'portfolio': FieldValue.arrayUnion([stockData])
+      });
     } catch (e) {
-      print("Error saving portfolio: $e");
+      print("Error adding stock: $e");
+      throw e; // Throw so UI knows it failed
     }
   }
 
+  // NEW: Remove a single stock
+  static Future<void> removeStockFromPortfolio(String userId, Map<String, dynamic> stockData) async {
+    try {
+      await _db.collection('users').doc(userId).update({
+        'portfolio': FieldValue.arrayRemove([stockData])
+      });
+    } catch (e) {
+      print("Error removing stock: $e");
+    }
+  }
+
+  // Load all stocks
   static Future<List<Map<String, dynamic>>> loadPortfolio(String userId) async {
     try {
       DocumentSnapshot doc = await _db.collection('users').doc(userId).get();
@@ -40,7 +51,6 @@ class DatabaseService {
   // ==============================================================================
   // 2. TRANSACTIONS (The History - NEW PROFESSIONAL FEATURE)
   // ==============================================================================
-  // This creates a separate sub-collection so your history can grow forever
   static Future<void> logTransaction(String userId, {
     required String symbol,
     required String type, // "BUY" or "SELL"
@@ -51,14 +61,14 @@ class DatabaseService {
       await _db
           .collection('users')
           .doc(userId)
-          .collection('transactions') // Sub-collection
+          .collection('transactions')
           .add({
         'symbol': symbol,
         'type': type,
         'shares': shares,
         'price': price,
         'totalValue': shares * price,
-        'date': FieldValue.serverTimestamp(), // Server time is accurate
+        'date': FieldValue.serverTimestamp(),
       });
     } catch (e) {
       print("Error logging transaction: $e");
@@ -100,30 +110,25 @@ class DatabaseService {
   }
 
   // ==============================================================================
-  // 4. RISK SETTINGS (The Preferences - NEW PROFESSIONAL FEATURE)
+  // 4. RISK SETTINGS (Preferences)
   // ==============================================================================
-  // Saves your Dashboard toggles (RSI, MACD, etc.) so they persist
   static Future<void> saveRiskSettings(String userId, {
     required bool showRSI,
     required bool showMACD,
     required bool showBollinger,
     required bool showATR,
-    required bool showSentiment,
-    required bool showVolume,
   }) async {
     try {
       await _db
           .collection('users')
           .doc(userId)
-          .collection('settings') // Sub-collection for cleaner organization
+          .collection('settings')
           .doc('risk_prefs')
           .set({
         'showRSI': showRSI,
         'showMACD': showMACD,
         'showBollinger': showBollinger,
         'showATR': showATR,
-        'showSentiment': showSentiment,
-        'showVolume': showVolume,
       });
     } catch (e) {
       print("Error saving risk settings: $e");
@@ -146,7 +151,7 @@ class DatabaseService {
   }
 
   // ==============================================================================
-  // 5. PROFILE & APP SETTINGS (General)
+  // 5. PROFILE & SETTINGS
   // ==============================================================================
   static Future<void> saveProfileImage(String userId, String path) async {
     await _db.collection('users').doc(userId).set({
@@ -158,39 +163,12 @@ class DatabaseService {
     try {
       DocumentSnapshot doc = await _db.collection('users').doc(userId).get();
       if (doc.exists) {
-        final data = doc.data() as Map<String, dynamic>?; // Safety check
+        final data = doc.data() as Map<String, dynamic>?;
         return data?['profile_image'] as String?;
       }
     } catch (e) {
       print("Error loading profile image: $e");
     }
     return null;
-  }
-
-  static Future<void> saveSettings(String userId, Map<String, dynamic> settings) async {
-    await _db.collection('users').doc(userId).set({
-      'settings': settings,
-    }, SetOptions(merge: true));
-  }
-
-  static Future<Map<String, dynamic>> loadSettings(String userId) async {
-    try {
-      DocumentSnapshot doc = await _db.collection('users').doc(userId).get();
-      if (doc.exists && doc.data() != null) {
-        final data = doc.data() as Map<String, dynamic>;
-        if (data.containsKey('settings')) {
-          return Map<String, dynamic>.from(data['settings']);
-        }
-      }
-    } catch (e) {
-      print("Error loading settings: $e");
-    }
-    
-    // Default settings
-    return {
-      'darkMode': false,
-      'currency': 'USD',
-      'notifications': true,
-    };
   }
 }
