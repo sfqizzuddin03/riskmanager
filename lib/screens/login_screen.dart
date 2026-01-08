@@ -1,9 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/auth_service.dart';
-import 'stock_selection_screen.dart';
 import 'setup_profile_screen.dart';
-import 'package:provider/provider.dart';
-import '../providers/portfolio_provider.dart';
 import 'main_screen.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -17,7 +14,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
   final TextEditingController _initialCapitalController = TextEditingController();
-  final AuthService _auth = AuthService();//
+  final AuthService _auth = AuthService();
   
   bool _isLogin = true;
   bool _isLoading = false;
@@ -52,10 +49,8 @@ class _LoginScreenState extends State<LoginScreen> {
       }
 
       if (_auth.isLoggedIn) {
-        // CRITICAL FIX: Reload data for the new user immediately
-        if (mounted) {
-           Provider.of<PortfolioProvider>(context, listen: false).loadPortfolio();
-        }
+        // FIXED: Removed Provider loading logic. 
+        // The PositionManagementScreen will fetch its own data when opened.
 
         if (!_isLogin) {
           Navigator.pushReplacement(
@@ -65,7 +60,8 @@ class _LoginScreenState extends State<LoginScreen> {
         } else {
           Navigator.pushReplacement(
             context,
-            MaterialPageRoute(builder: (context) => const MainScreen(selectedStocks: [])), // Pass empty, we will load saved ones
+            // Pass empty list, the MainScreen handles data now
+            MaterialPageRoute(builder: (context) => const MainScreen(selectedStocks: [])), 
           );
         }
       }
@@ -107,56 +103,55 @@ class _LoginScreenState extends State<LoginScreen> {
           : Padding(
               padding: const EdgeInsets.all(20.0),
               child: Column(
-  mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        Icon(
-          Icons.account_balance_wallet,
-          size: 64,
-          color: Colors.blue.shade700,
-        ),
-        const SizedBox(height: 20),
-        Text(
-          _isLogin ? 'Welcome Back' : 'Create Account',
-          style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-        ),
-        const SizedBox(height: 30),
-        
-        TextField(
-          controller: _emailController,
-          decoration: const InputDecoration(
-            labelText: 'Email',
-            border: OutlineInputBorder(),
-            prefixIcon: Icon(Icons.email),
-          ),
-          keyboardType: TextInputType.emailAddress,
-        ),
-        const SizedBox(height: 15),
-        
-        TextField(
-          controller: _passwordController,
-          obscureText: true,
-          decoration: const InputDecoration(
-            labelText: 'Password',
-            border: OutlineInputBorder(),
-            prefixIcon: Icon(Icons.lock),
-          ),
-        ),
-        const SizedBox(height: 15),
-        
-        if (!_isLogin) ...[
-          TextField(
-            controller: _initialCapitalController,
-            keyboardType: TextInputType.number,
-            decoration: const InputDecoration(
-              labelText: 'Initial Capital (\$)',
-              border: OutlineInputBorder(),
-              prefixIcon: Icon(Icons.attach_money),
-            ),
-          ),
-          const SizedBox(height: 15),
-        ],
-        
-                      
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.account_balance_wallet,
+                    size: 64,
+                    color: Colors.blue.shade700,
+                  ),
+                  const SizedBox(height: 20),
+                  Text(
+                    _isLogin ? 'Welcome Back' : 'Create Account',
+                    style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 30),
+                  
+                  TextField(
+                    controller: _emailController,
+                    decoration: const InputDecoration(
+                      labelText: 'Email',
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.email),
+                    ),
+                    keyboardType: TextInputType.emailAddress,
+                  ),
+                  const SizedBox(height: 15),
+                  
+                  TextField(
+                    controller: _passwordController,
+                    obscureText: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Password',
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.lock),
+                    ),
+                  ),
+                  const SizedBox(height: 15),
+                  
+                  if (!_isLogin) ...[
+                    TextField(
+                      controller: _initialCapitalController,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: 'Initial Capital (\$)',
+                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.attach_money),
+                      ),
+                    ),
+                    const SizedBox(height: 15),
+                  ],
+                  
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(

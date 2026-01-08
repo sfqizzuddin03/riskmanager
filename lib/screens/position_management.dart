@@ -1,10 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import '../models/portfolio.dart';
-import '../providers/portfolio_provider.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import '../services/database_service.dart';
 
 class PositionManagementScreen extends StatefulWidget {
-  // We don't need to pass stocks anymore, we read from the Provider/Watchlist
   const PositionManagementScreen({super.key});
 
   @override
@@ -15,118 +14,155 @@ class _PositionManagementScreenState extends State<PositionManagementScreen> {
   final TextEditingController _sharesController = TextEditingController();
   final TextEditingController _priceController = TextEditingController();
   String? _selectedSymbol;
+  bool _isLoading = false;
 
-  // Curated list for the Dropdown (Simulating a search)
+  // Common stocks for the dropdown
   final List<String> _commonStocks = [
     'AAPL', 'TSLA', 'GOOGL', 'MSFT', 'AMZN', 'NVDA', 'META', 'NFLX', 'AMD', 'INTC'
   ];
 
-  void _addPosition() {
+  Future<void> _addPosition() async {
     final shares = int.tryParse(_sharesController.text) ?? 0;
     final price = double.tryParse(_priceController.text) ?? 0.0;
     final symbol = _selectedSymbol;
+    final user = FirebaseAuth.instance.currentUser;
 
-    if (symbol == null || shares <= 0 || price <= 0) {
+    if (symbol == null || shares <= 0 || price <= 0 || user == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please select a stock and enter valid numbers'), backgroundColor: Colors.red),
       );
       return;
     }
 
-    // Save to Global Provider
-    final position = PortfolioPosition(
-      symbol: symbol,
-      companyName: symbol, // In a real app, fetch the name
-      shares: shares,
-      entryPrice: price,
-      currentPrice: price, 
-      entryDate: DateTime.now(),
-    );
+    setState(() => _isLoading = true);
 
-    Provider.of<PortfolioProvider>(context, listen: false).addPosition(position);
+    try {
+      // 1. Create the new position object
+      final newPosition = {
+        'symbol': symbol,
+        'name': 'Stock Equity', 
+        'shares': shares,
+        'entryPrice': price,
+        'entryDate': DateTime.now().toIso8601String(),
+        'isRealData': true, 
+      };
 
-    // Reset UI
-    _sharesController.clear();
-    _priceController.clear();
-    FocusScope.of(context).unfocus(); // Hide keyboard
+      // 2. Save directly to Firestore (The "Real" Database)
+      final userRef = FirebaseFirestore.instance.collection('users').doc(user.uid);
+      
+      await userRef.update({
+        'portfolio': FieldValue.arrayUnion([newPosition])
+      });
 
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Added $shares shares of $symbol')));
+      // 3. NEW: Log the Transaction (The "Pro" Way)
+      // This creates the permanent history record in the sub-collection
+      await DatabaseService.logTransaction(
+        user.uid,
+        symbol: symbol,
+        type: "BUY",
+        shares: shares,
+        price: price,
+      );
+
+      // 4. Success UI updates
+      _sharesController.clear();
+      _priceController.clear();
+      FocusScope.of(context).unfocus();
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Bought $shares shares of $symbol!'), backgroundColor: Colors.green)
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error adding stock: $e'), backgroundColor: Colors.red),
+      );
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  // Helper to remove a stock from Firebase
+  Future<void> _removePosition(Map<String, dynamic> position) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    await FirebaseFirestore.instance.collection('users').doc(user.uid).update({
+      'portfolio': FieldValue.arrayRemove([position])
+    });
   }
 
   @override
   Widget build(BuildContext context) {
-    final portfolio = Provider.of<PortfolioProvider>(context);
+    final user = FirebaseAuth.instance.currentUser;
 
-    // 1. SHOW "BUBBLE TOUR" IF EMPTY
-    if (portfolio.positions.isEmpty) {
-      return Stack(
-        children: [
-          _buildInputForm(),
-          Positioned(
-            bottom: 20,
-            left: 20,
-            right: 20,
-            child: Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.blueAccent,
-                borderRadius: BorderRadius.circular(20),
-                boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 10, offset: Offset(0, 5))],
-              ),
-              child: Row(
-                children: const [
-                  Icon(Icons.lightbulb, color: Colors.yellow, size: 30),
-                  SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      "Start Here! Select a stock above, enter your shares, and tap Add to track your wealth.",
-                      style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      );
-    }
+    return StreamBuilder<DocumentSnapshot>(
+      // Listen to the Database in Real-Time
+      stream: FirebaseFirestore.instance.collection('users').doc(user?.uid).snapshots(),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
 
-    return Column(
-      children: [
-        // Top: Input Form
-        _buildInputForm(),
-        
-        const Divider(thickness: 4, color: Colors.grey),
+        final data = snapshot.data!.data() as Map<String, dynamic>?;
+        final portfolio = List<Map<String, dynamic>>.from(data?['portfolio'] ?? []);
 
-        // Bottom: List
-        Expanded(
-          child: ListView.builder(
-            itemCount: portfolio.positions.length,
-            itemBuilder: (context, index) {
-              final pos = portfolio.positions[index];
-              return Dismissible(
-                key: Key(pos.symbol + index.toString()),
-                background: Container(color: Colors.red, alignment: Alignment.centerRight, padding: const EdgeInsets.only(right: 20), child: const Icon(Icons.delete, color: Colors.white)),
-                onDismissed: (_) {
-                  Provider.of<PortfolioProvider>(context, listen: false).removePosition(index);
-                },
-                child: Card(
-                  margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                  child: ListTile(
-                    leading: CircleAvatar(child: Text(pos.symbol.substring(0, 1))),
-                    title: Text(pos.symbol, style: const TextStyle(fontWeight: FontWeight.bold)),
-                    subtitle: Text("${pos.shares} shares @ \$${pos.entryPrice}"),
-                    trailing: Text(
-                      "\$${(pos.shares * pos.entryPrice).toStringAsFixed(0)}",
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.green),
-                    ),
-                  ),
+        return Column(
+          children: [
+            // Top: Input Form
+            _buildInputForm(),
+            
+            if (_isLoading) const LinearProgressIndicator(),
+
+            const Divider(thickness: 4, color: Colors.grey),
+
+            // Bottom: List of Owned Stocks
+            Expanded(
+              child: portfolio.isEmpty 
+              ? _buildEmptyState()
+              : ListView.builder(
+                  itemCount: portfolio.length,
+                  itemBuilder: (context, index) {
+                    final pos = portfolio[index];
+                    final shares = pos['shares'] as int;
+                    final price = (pos['entryPrice'] as num).toDouble();
+                    final symbol = pos['symbol'] as String;
+
+                    return Dismissible(
+                      key: Key(symbol + index.toString()),
+                      background: Container(
+                        color: Colors.red, 
+                        alignment: Alignment.centerRight, 
+                        padding: const EdgeInsets.only(right: 20), 
+                        child: const Icon(Icons.delete, color: Colors.white)
+                      ),
+                      onDismissed: (_) => _removePosition(pos),
+                      child: Card(
+                        margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                        child: ListTile(
+                          leading: CircleAvatar(
+                            backgroundColor: Colors.blue.shade100,
+                            child: Text(symbol.substring(0, 1), style: const TextStyle(fontWeight: FontWeight.bold)),
+                          ),
+                          title: Text(symbol, style: const TextStyle(fontWeight: FontWeight.bold)),
+                          subtitle: Text("$shares shares @ \$${price.toStringAsFixed(2)}"),
+                          trailing: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              Text(
+                                "\$${(shares * price).toStringAsFixed(2)}",
+                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.green),
+                              ),
+                              const Text("Total Value", style: TextStyle(fontSize: 10, color: Colors.grey)),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  },
                 ),
-              );
-            },
-          ),
-        ),
-      ],
+            ),
+          ],
+        );
+      }
     );
   }
 
@@ -137,10 +173,9 @@ class _PositionManagementScreenState extends State<PositionManagementScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Text("Add New Position", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          const Text("Buy / Add New Position", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
           const SizedBox(height: 15),
           
-          // DROPDOWN INSTEAD OF TEXT FIELD
           DropdownButtonFormField<String>(
             value: _selectedSymbol,
             decoration: const InputDecoration(
@@ -175,9 +210,9 @@ class _PositionManagementScreenState extends State<PositionManagementScreen> {
           ),
           const SizedBox(height: 15),
           ElevatedButton.icon(
-            onPressed: _addPosition,
+            onPressed: _isLoading ? null : _addPosition,
             icon: const Icon(Icons.add),
-            label: const Text("Add to Portfolio"),
+            label: const Text("Buy Stock"),
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.blue,
               foregroundColor: Colors.white,
@@ -185,6 +220,36 @@ class _PositionManagementScreenState extends State<PositionManagementScreen> {
             ),
           )
         ],
+      ),
+    );
+  }
+
+  Widget _buildEmptyState() {
+    return Center(
+      child: Container(
+        padding: const EdgeInsets.all(20),
+        margin: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: Colors.blueAccent.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: const [
+            Icon(Icons.account_balance_wallet, color: Colors.blueAccent, size: 40),
+            SizedBox(height: 10),
+            Text(
+              "Your Portfolio is Empty",
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.blueAccent),
+            ),
+            SizedBox(height: 5),
+            Text(
+              "Use the form above to add stocks you own.",
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.grey),
+            ),
+          ],
+        ),
       ),
     );
   }

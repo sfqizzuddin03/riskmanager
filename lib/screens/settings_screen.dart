@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:provider/provider.dart';
 import '../providers/settings_provider.dart';
-import '../providers/portfolio_provider.dart'; // REQUIRED for logout clearing
 import '../services/auth_service.dart';
 import 'login_screen.dart';
 
@@ -83,8 +82,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   // 4. Logout Logic
   void _performLogout() async {
-    // Clear local data so next user doesn't see it
-    Provider.of<PortfolioProvider>(context, listen: false).clearData();
+    // FIXED: Removed Provider clearing logic as we removed the provider.
     
     // Sign out from Firebase
     await AuthService().signOut();
@@ -101,7 +99,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Widget build(BuildContext context) {
     final settings = Provider.of<SettingsProvider>(context);
 
-    // NO SCAFFOLD. NO APP BAR. (Controlled by MainScreen now)
     return Container(
       color: settings.isDarkMode ? Colors.black : Colors.grey[100],
       child: ListView(

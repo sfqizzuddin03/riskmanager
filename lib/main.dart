@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:provider/provider.dart';
-import 'providers/portfolio_provider.dart';
-import 'providers/settings_provider.dart'; // Import the new provider
+import 'providers/settings_provider.dart'; 
 import 'screens/login_screen.dart';
 
 void main() async {
@@ -12,8 +11,8 @@ void main() async {
   runApp(
     MultiProvider(
       providers: [
-        ChangeNotifierProvider(create: (_) => PortfolioProvider()..loadPortfolio()),
-        ChangeNotifierProvider(create: (_) => SettingsProvider()), // Add this line
+        // FIXED: Removed PortfolioProvider since we deleted it
+        ChangeNotifierProvider(create: (_) => SettingsProvider()), 
       ],
       child: const MyApp(),
     ),
@@ -25,13 +24,11 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Listen to SettingsProvider for Dark Mode
     final settings = Provider.of<SettingsProvider>(context);
 
     return MaterialApp(
       title: 'Investive',
       debugShowCheckedModeBanner: false,
-      // REAL THEME SWITCHING LOGIC
       themeMode: settings.isDarkMode ? ThemeMode.dark : ThemeMode.light,
       theme: ThemeData(
         brightness: Brightness.light,
