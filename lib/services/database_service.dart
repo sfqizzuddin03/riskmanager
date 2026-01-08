@@ -171,4 +171,25 @@ class DatabaseService {
     }
     return null;
   }
+
+
+  // --- BUCKET 6: GLOBAL ASSETS (The "Legit" Data Fetcher) ---
+  // Returns a list of stocks supported by the app
+  static Future<List<String>> getSupportedAssets() async {
+    try {
+      // 1. Try to fetch from the "Legit" Firestore collection first
+      final snapshot = await _db.collection('assets').get();
+      
+      if (snapshot.docs.isNotEmpty) {
+        // Return the list of Document IDs (AAPL, TSLA, etc.)
+        return snapshot.docs.map((d) => d.id).toList();
+      }
+    } catch (e) {
+      print("Error loading assets from DB: $e");
+    }
+    
+    // 2. Fallback: If DB is empty or fails, use this hardcoded list so app doesn't crash
+    return ['AAPL', 'TSLA', 'GOOGL', 'MSFT', 'AMZN', 'NVDA', 'META', 'NFLX', 'AMD', 'INTC'];
+  }
+
 }

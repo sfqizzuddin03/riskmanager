@@ -17,9 +17,28 @@ class _PositionManagementScreenState extends State<PositionManagementScreen> {
   String? _selectedSymbol;
   bool _isLoading = false;
 
-  final List<String> _commonStocks = [
-    'AAPL', 'TSLA', 'GOOGL', 'MSFT', 'AMZN', 'NVDA', 'META', 'NFLX', 'AMD', 'INTC'
-  ];
+  // --- CHANGE 1: START WITH EMPTY LIST ---
+  List<String> _commonStocks = []; 
+
+  @override
+  void initState() {
+    super.initState();
+    // --- CHANGE 2: FETCH FROM DB ON STARTUP ---
+    _loadAssetsFromDatabase();
+  }
+
+  Future<void> _loadAssetsFromDatabase() async {
+    // This calls the "Legit" method we made in DatabaseService
+    final assets = await DatabaseService.getSupportedAssets();
+    
+    if (mounted) {
+      setState(() {
+        _commonStocks = assets; // Now the dropdown is powered by Firestore!
+        // If the list is not empty, you might want to select the first one optionally
+        // if (_commonStocks.isNotEmpty) _selectedSymbol = _commonStocks[0];
+      });
+    }
+  }
 
   Future<void> _onSymbolChanged(String? symbol) async {
     setState(() => _selectedSymbol = symbol);
@@ -84,7 +103,6 @@ class _PositionManagementScreenState extends State<PositionManagementScreen> {
     if (user == null) return;
 
     await DatabaseService.removeStockFromPortfolio(user.uid, position);
-
     await DatabaseService.logTransaction(
       user.uid,
       symbol: position['symbol'],
@@ -96,13 +114,12 @@ class _PositionManagementScreenState extends State<PositionManagementScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // --- DARK MODE LOGIC ---
+    // Theme Colors
     final isDarkMode = Theme.of(context).brightness == Brightness.dark;
     final bgColor = isDarkMode ? Colors.black : Colors.grey[100]!;
     final cardColor = isDarkMode ? Colors.grey[900]! : Colors.white;
     final textColor = isDarkMode ? Colors.white : Colors.black87;
     final inputFillColor = isDarkMode ? Colors.grey[800] : Colors.grey[50];
-    // -----------------------
 
     final user = FirebaseAuth.instance.currentUser;
 
@@ -125,7 +142,6 @@ class _PositionManagementScreenState extends State<PositionManagementScreen> {
 
           return Column(
             children: [
-              // Pass colors to sub-widgets
               _buildInputCard(cardColor, textColor, inputFillColor),
               
               if (_isLoading) const LinearProgressIndicator(),
@@ -163,9 +179,10 @@ class _PositionManagementScreenState extends State<PositionManagementScreen> {
           Text("Add New Asset", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: textColor)),
           const SizedBox(height: 15),
           
+          // --- CHANGE 3: DROPDOWN NOW USES _commonStocks (FETCHED FROM DB) ---
           DropdownButtonFormField<String>(
             value: _selectedSymbol,
-            dropdownColor: cardColor, // Fix dropdown menu color
+            dropdownColor: cardColor, 
             decoration: InputDecoration(
               labelText: "Select Symbol",
               labelStyle: TextStyle(color: textColor.withOpacity(0.7)),
@@ -174,9 +191,10 @@ class _PositionManagementScreenState extends State<PositionManagementScreen> {
               border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
               prefixIcon: Icon(Icons.search, color: textColor),
             ),
-            items: _commonStocks.map((s) => DropdownMenuItem(
+            // Ensure the items list is unique to prevent duplicate key errors
+            items: _commonStocks.toSet().map((s) => DropdownMenuItem(
               value: s, 
-              child: Text(s, style: TextStyle(color: textColor)) // Fix dropdown text color
+              child: Text(s, style: TextStyle(color: textColor)) 
             )).toList(),
             onChanged: _onSymbolChanged,
           ),
