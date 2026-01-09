@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_auth/firebase_auth.dart'; // <--- FIXES "Undefined name FirebaseAuth"
+import '../services/database_service.dart';        // <--- FIXES "Undefined name DatabaseService"
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -11,7 +12,7 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
-  bool _isLogin = true; // Toggle between Login and Sign Up
+  bool _isLogin = true; 
   bool _isLoading = false;
 
   // --- AUTH LOGIC ---
@@ -31,18 +32,15 @@ class _LoginScreenState extends State<LoginScreen> {
           password: _passwordController.text.trim(),
         );
       }
-      // No need to navigate manually; main.dart StreamBuilder handles it!
-    } on FirebaseAuthException catch (e) {
-      String message = "An error occurred.";
-      if (e.code == 'user-not-found') message = "No user found for that email.";
-      else if (e.code == 'wrong-password') message = "Wrong password.";
-      else if (e.code == 'email-already-in-use') message = "Email already registered.";
-      
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(message), backgroundColor: Colors.redAccent),
-        );
+
+      // Sync user data to Firestore (The "Legit" step)
+      // This will now work because we fixed DatabaseService in Step 1
+      if (FirebaseAuth.instance.currentUser != null) {
+        await DatabaseService.syncUserData(FirebaseAuth.instance.currentUser!);
       }
+      
+    } on FirebaseAuthException catch (e) {
+      _showError(e.message ?? "An error occurred.");
     } catch (e) {
       print(e);
     } finally {
@@ -50,9 +48,38 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
+  // --- FORGOT PASSWORD LOGIC ---
+  Future<void> _resetPassword() async {
+    if (_emailController.text.isEmpty) {
+      _showError("Please enter your email address first.");
+      return;
+    }
+
+    try {
+      await FirebaseAuth.instance.sendPasswordResetEmail(email: _emailController.text.trim());
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Password reset email sent! Check your inbox."),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } on FirebaseAuthException catch (e) {
+      _showError(e.message ?? "Error sending reset email.");
+    }
+  }
+
+  void _showError(String message) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message), backgroundColor: Colors.redAccent),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    // Professional Finance Colors
     final primaryColor = Colors.blueGrey.shade900;
     final accentColor = Colors.blueAccent.shade200;
 
@@ -100,7 +127,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 Container(
                   padding: const EdgeInsets.all(30),
                   decoration: BoxDecoration(
-                    color: Colors.white, // Clean white card for contrast
+                    color: Colors.white,
                     borderRadius: BorderRadius.circular(20),
                     boxShadow: [
                       BoxShadow(
@@ -152,7 +179,18 @@ class _LoginScreenState extends State<LoginScreen> {
                           ),
                         ),
                       ),
-                      const SizedBox(height: 25),
+                      
+                      // Forgot Password Button
+                      if (_isLogin) 
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: TextButton(
+                            onPressed: _resetPassword,
+                            child: const Text("Forgot Password?", style: TextStyle(fontSize: 12)),
+                          ),
+                        ),
+                        
+                      const SizedBox(height: 15),
 
                       // Submit Button
                       SizedBox(

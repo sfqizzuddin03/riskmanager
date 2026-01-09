@@ -1,8 +1,35 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 class DatabaseService {
   // Use the main Firestore instance
   static final FirebaseFirestore _db = FirebaseFirestore.instance;
+
+  // ... inside DatabaseService class ...
+
+  // --- BUCKET 0: USER METADATA (The "Legit" Fields) ---
+  static Future<void> syncUserData(User user) async {
+    final userDoc = _db.collection('users').doc(user.uid);
+    final snapshot = await userDoc.get();
+    
+    if (!snapshot.exists) {
+      // New User: Create full profile
+      await userDoc.set({
+        'uid': user.uid,
+        'email': user.email,
+        'displayName': user.displayName ?? 'Trader',
+        'createdAt': FieldValue.serverTimestamp(),
+        'lastLogin': FieldValue.serverTimestamp(),
+        'accountStatus': 'active', 
+        'role': 'user',            
+      });
+    } else {
+      // Existing User: Just update login time
+      await userDoc.update({
+        'lastLogin': FieldValue.serverTimestamp(),
+      });
+    }
+  }
 
   // ==============================================================================
   // 1. PORTFOLIO (The Money)
@@ -112,28 +139,38 @@ class DatabaseService {
   // ==============================================================================
   // 4. RISK SETTINGS (Preferences)
   // ==============================================================================
-  static Future<void> saveRiskSettings(String userId, {
-    required bool showRSI,
-    required bool showMACD,
-    required bool showBollinger,
-    required bool showATR,
-  }) async {
-    try {
-      await _db
-          .collection('users')
-          .doc(userId)
-          .collection('settings')
-          .doc('risk_prefs')
-          .set({
-        'showRSI': showRSI,
-        'showMACD': showMACD,
-        'showBollinger': showBollinger,
-        'showATR': showATR,
-      });
-    } catch (e) {
-      print("Error saving risk settings: $e");
+    static Future<void> saveRiskSettings(String userId, {
+      required bool showRSI,
+      required bool showMACD,
+      required bool showBollinger,
+      required bool showATR,
+      required bool showSMA,
+      required bool showEMA,
+      required bool showStoch,
+      required bool showCCI,
+      required bool showWilliams,
+    }) async {
+      try {
+        await _db
+            .collection('users')
+            .doc(userId)
+            .collection('settings')
+            .doc('risk_prefs')
+            .set({
+          'showRSI': showRSI,
+          'showMACD': showMACD,
+          'showBollinger': showBollinger,
+          'showATR': showATR,
+          'showSMA': showSMA,
+          'showEMA': showEMA,
+          'showStoch': showStoch,
+          'showCCI': showCCI,
+          'showWilliams': showWilliams,
+        });
+      } catch (e) {
+        print("Error saving risk settings: $e");
+      }
     }
-  }
 
   static Future<Map<String, dynamic>> getRiskSettings(String userId) async {
     try {
@@ -191,5 +228,10 @@ class DatabaseService {
     // 2. Fallback: If DB is empty or fails, use this hardcoded list so app doesn't crash
     return ['AAPL', 'TSLA', 'GOOGL', 'MSFT', 'AMZN', 'NVDA', 'META', 'NFLX', 'AMD', 'INTC'];
   }
+
+  
+
+
+
 
 }

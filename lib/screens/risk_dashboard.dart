@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import '../services/database_service.dart';
 import '../services/risk_calculator.dart';
-import 'position_management.dart'; // Import this so we can link to it
 
 class RiskDashboard extends StatefulWidget {
   const RiskDashboard({super.key});
@@ -12,20 +11,11 @@ class RiskDashboard extends StatefulWidget {
 }
 
 class _RiskDashboardState extends State<RiskDashboard> {
-  // Local storage for the data
   List<Map<String, dynamic>> _userStocks = [];
   String? _selectedSymbol;
-
-  // Analysis Metrics
-  Map<String, dynamic> _currentStockMetrics = {};
-  double _portfolioRiskScore = 0.0;
+  Map<String, dynamic> _metrics = {};
   bool _isLoading = true;
-
-  // Settings Toggles
-  bool _showRSI = true;
-  bool _showBollinger = true;
-  bool _showMACD = true;
-  bool _showATR = false;
+  double _portfolioRiskScore = 0.0;
 
   @override
   void initState() {
@@ -33,141 +23,106 @@ class _RiskDashboardState extends State<RiskDashboard> {
     _fetchDataAndInit();
   }
 
-  // 1. FETCH DATA
   Future<void> _fetchDataAndInit() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
-
     try {
-      final doc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
-      
-      // Strict check: Does the portfolio exist AND is it not empty?
-      if (doc.exists && doc.data()!.containsKey('portfolio')) {
-        final rawList = List<Map<String, dynamic>>.from(doc.data()!['portfolio']);
-        
-        // Filter out bad data (empty symbols)
-        final validList = rawList.where((s) => s['symbol'] != null && s['symbol'].toString().isNotEmpty).toList();
-
-        if (mounted) {
-          setState(() {
-            _userStocks = validList;
-          });
-          
-          // Only init dashboard if we actually have stocks
-          if (validList.isNotEmpty) {
-            _initDashboard();
-          } else {
-             setState(() => _isLoading = false);
-          }
-        }
-      } else {
-        if (mounted) setState(() => _isLoading = false);
+      final portfolio = await DatabaseService.loadPortfolio(user.uid);
+      if (mounted) {
+        setState(() => _userStocks = portfolio);
+        _initDashboard();
       }
     } catch (e) {
-      print("Error fetching portfolio: $e");
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
   void _initDashboard() {
     if (_userStocks.isNotEmpty) {
-      _selectedSymbol ??= _userStocks.first['symbol'];
-      _analyzeSelectedStock();
+      final valid = _userStocks.where((s) => s['symbol'] != null).toList();
+      if (valid.isNotEmpty) {
+        _selectedSymbol ??= valid.first['symbol'];
+        _analyzeSelectedStock();
+      } else {
+        if (mounted) setState(() => _isLoading = false);
+      }
+    } else {
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  // 2. ANALYZE STOCK
   Future<void> _analyzeSelectedStock() async {
     if (_selectedSymbol == null) return;
     setState(() => _isLoading = true);
 
     try {
       final symbol = _selectedSymbol!;
-
       final results = await Future.wait([
-        RiskCalculator.calculateRSI(symbol, 14),           // 0
-        RiskCalculator.calculateBollingerBands(symbol, 20),// 1
-        RiskCalculator.calculateMACD(symbol),              // 2
-        RiskCalculator.calculateRealATR(symbol)            // 3
+        RiskCalculator.calculateRSI(symbol, 14),           
+        RiskCalculator.calculateBollingerBands(symbol, 20),
+        RiskCalculator.getVolumeRatio(symbol),             
+        RiskCalculator.calculateRealATR(symbol),           
       ]);
 
       if (mounted) {
         setState(() {
-          _currentStockMetrics = {
+          _metrics = {
             'rsi': results[0],
             'bollinger': results[1],
-            'macd': results[2],
+            'volume': results[2],
             'atr': results[3],
           };
-          _calculatePreciseScore(); // Recalculate total score
+          _portfolioRiskScore = (results[0] as double); 
           _isLoading = false;
         });
       }
     } catch (e) {
-      print("Error analyzing stock: $e");
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  // 3. CALCULATE SCORE
-  Future<void> _calculatePreciseScore() async {
-    double totalWeightedRsi = 0;
-    double totalShares = 0;
-
-    for (var stock in _userStocks) {
-      final symbol = stock['symbol'];
-      final shares = (stock['shares'] as num?)?.toDouble() ?? 0.0; 
-
-      if (symbol != null && shares > 0) {
-        double rsi = await RiskCalculator.calculateRSI(symbol, 14);
-        totalWeightedRsi += (rsi * shares);
-        totalShares += shares;
-      }
-    }
-
-    // FIXED: If total shares is 0, score is 0 (Unknown), NOT 50 (Neutral)
-    double finalScore = totalShares > 0 ? totalWeightedRsi / totalShares : 0.0;
-    
-    if (mounted) {
-      setState(() => _portfolioRiskScore = finalScore);
-    }
-  }
-
-  // 4. SETTINGS MODAL
-  void _showIndicatorSettings() {
+  // --- NEW: INSIGHT POP-UP LOGIC ---
+  void _showInsight(String title, String definition, String strategy) {
     showModalBottomSheet(
       context: context,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (context) {
-        return StatefulBuilder(
-          builder: (BuildContext context, StateSetter setModalState) {
-            return Container(
-              padding: const EdgeInsets.all(20),
-              height: 400,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+        final isDark = Theme.of(context).brightness == Brightness.dark;
+        return Container(
+          padding: const EdgeInsets.all(25),
+          decoration: BoxDecoration(
+            color: isDark ? Colors.grey[900] : Colors.white,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
                 children: [
-                  const Text("Analysis Indicators", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-                  const Divider(),
-                  SwitchListTile(
-                    title: const Text("RSI"),
-                    value: _showRSI,
-                    onChanged: (val) { setModalState(() => _showRSI = val); setState(() {}); },
-                  ),
-                  SwitchListTile(
-                    title: const Text("MACD"),
-                    value: _showMACD,
-                    onChanged: (val) { setModalState(() => _showMACD = val); setState(() {}); },
-                  ),
-                  SwitchListTile(
-                    title: const Text("Bollinger Bands"),
-                    value: _showBollinger,
-                    onChanged: (val) { setModalState(() => _showBollinger = val); setState(() {}); },
-                  ),
+                  Icon(Icons.lightbulb, color: Colors.amber.shade600, size: 28),
+                  const SizedBox(width: 10),
+                  Text(title, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
                 ],
               ),
-            );
-          },
+              const Divider(height: 30),
+              const Text("WHAT IS IT?", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey, fontSize: 12)),
+              const SizedBox(height: 5),
+              Text(definition, style: const TextStyle(fontSize: 16)),
+              const SizedBox(height: 20),
+              const Text("HOW TO TRADE IT", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blueAccent, fontSize: 12)),
+              const SizedBox(height: 5),
+              Text(strategy, style: const TextStyle(fontSize: 16)),
+              const SizedBox(height: 20),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text("Got it!"),
+                ),
+              )
+            ],
+          ),
         );
       },
     );
@@ -175,125 +130,104 @@ class _RiskDashboardState extends State<RiskDashboard> {
 
   @override
   Widget build(BuildContext context) {
-    // Dark Mode Logic
-    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
-    final bgColor = isDarkMode ? Colors.black : Colors.grey[50]!;
-    final textColor = isDarkMode ? Colors.white : Colors.black87;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final textColor = isDark ? Colors.white : Colors.black87;
 
-    // --- 1. EMPTY STATE CHECK (The Critical Fix) ---
-    if (!_isLoading && _userStocks.isEmpty) {
-      return Scaffold(
-        backgroundColor: bgColor,
-        appBar: AppBar(
-          title: const Text("Risk Dashboard"),
-          backgroundColor: Colors.blueGrey.shade900,
-          foregroundColor: Colors.white,
-        ),
-        body: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(Icons.analytics_outlined, size: 80, color: Colors.grey.shade400),
-              const SizedBox(height: 20),
-              Text(
-                "No Portfolio Data",
-                style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: textColor),
-              ),
-              const SizedBox(height: 10),
-              Text(
-                "Add assets to your portfolio to\nunlock risk analysis.",
-                textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.grey.shade500),
-              ),
-              const SizedBox(height: 30),
-              ElevatedButton.icon(
-                icon: const Icon(Icons.add),
-                label: const Text("Add Assets Now"),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.blueGrey.shade900,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12)
-                ),
-                onPressed: () async {
-                   // Link to your Position Management Screen
-                   await Navigator.push(context, MaterialPageRoute(builder: (c) => const PositionManagementScreen()));
-                   // Refresh when back
-                   _fetchDataAndInit();
-                },
-              )
-            ],
-          ),
-        ),
-      );
-    }
-
-    // --- 2. MAIN DASHBOARD ---
     return Scaffold(
-      backgroundColor: bgColor,
       appBar: AppBar(
-        title: const Text("Risk Companion"),
-        backgroundColor: Colors.blueGrey.shade900,
-        foregroundColor: Colors.white,
-        actions: [
-          IconButton(icon: const Icon(Icons.tune), onPressed: _showIndicatorSettings)
-        ],
+        title: Text("Risk Dashboard", style: TextStyle(fontWeight: FontWeight.bold, color: textColor)),
+        backgroundColor: Theme.of(context).appBarTheme.backgroundColor,
+        elevation: 0,
+        iconTheme: IconThemeData(color: textColor),
       ),
       body: _isLoading 
         ? const Center(child: CircularProgressIndicator())
         : SingleChildScrollView(
-            child: Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _buildStockSelector(isDarkMode),
-                  const SizedBox(height: 20),
-                  _buildRiskScoreCard(isDarkMode),
-                  const SizedBox(height: 20),
-                  
-                  Row(
-                    children: [
-                      const Icon(Icons.analytics_outlined, color: Colors.blueGrey),
-                      const SizedBox(width: 8),
-                      Text("Technical Analysis", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: textColor)),
-                    ],
-                  ),
-                  const Divider(),
-                  const SizedBox(height: 10),
+            padding: const EdgeInsets.all(16.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (_userStocks.isNotEmpty) 
+                  _buildStockSelector(isDark)
+                else 
+                  const Center(child: Text("Add stocks in Portfolio to see analysis")),
 
-                  if (_showRSI) _buildRsiCard(isDarkMode),
-                  if (_showMACD) _buildMacdCard(isDarkMode),
-                  if (_showBollinger) _buildBollingerCard(isDarkMode),
-                  if (_showATR) _buildAtrCard(isDarkMode),
-                ],
-              ),
+                const SizedBox(height: 20),
+
+                // --- RISK SCORE WITH INSIGHT ---
+                _buildRiskScoreCard(context),
+                
+                const SizedBox(height: 20),
+                const Divider(),
+                const SizedBox(height: 10),
+                Text("Core Metrics", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: textColor)),
+                const SizedBox(height: 15),
+
+                // --- METRICS WITH INSIGHTS ---
+                
+                // 1. RSI
+                _buildMetricCard(
+                  context, 
+                  "RSI (14-Day)", 
+                  (_metrics['rsi'] ?? 0).toStringAsFixed(1), 
+                  _getRsiColor(_metrics['rsi']), 
+                  _getRsiStatus(_metrics['rsi']),
+                  "RSI Insight",
+                  "Measures the speed of price changes (The 'Greed Meter').",
+                  "• Above 70 (Red): Overbought. Be careful, price might drop.\n• Below 30 (Green): Oversold. Good chance for a bargain buy."
+                ),
+
+                // 2. BOLLINGER BANDS
+                _buildBollingerCard(context),
+
+                // 3. VOLUME
+                _buildMetricCard(
+                  context, 
+                  "Volume Ratio", 
+                  "${(_metrics['volume'] ?? 0).toStringAsFixed(2)}x", 
+                  (_metrics['volume'] ?? 0) > 1.5 ? Colors.purple : Colors.blueGrey, 
+                  "Relative to 5-Day Avg",
+                  "Volume Insight",
+                  "Compares today's trading activity to the average of the last 5 days (The 'Hype Meter').",
+                  "• High Ratio (> 2.0): Big news or big move happening.\n• Low Ratio (< 1.0): Quiet day, price moves might be fake."
+                ),
+
+                // 4. ATR
+                _buildMetricCard(
+                  context, 
+                  "Real ATR (Volatility)", 
+                  "\$${(_metrics['atr'] ?? 0).toStringAsFixed(2)}", 
+                  Colors.teal, 
+                  "Expected Daily Move",
+                  "ATR Insight",
+                  "Average True Range. It tells you how many dollars this stock moves in a single day.",
+                  "• Use this for Stop Losses.\n• Example: If ATR is \$5, set your stop loss \$5 below your buy price to avoid getting stopped out by random noise."
+                ),
+              ],
             ),
           ),
     );
   }
 
-  // --- WIDGETS ---
+  // --- WIDGET HELPERS ---
 
-  Widget _buildStockSelector(bool isDarkMode) {
+  Widget _buildStockSelector(bool isDark) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 12),
       decoration: BoxDecoration(
-        color: isDarkMode ? Colors.grey[900] : Colors.white,
-        border: Border.all(color: Colors.grey.shade300),
+        color: isDark ? Colors.grey[900] : Colors.white,
+        border: Border.all(color: Colors.grey.withOpacity(0.3)),
         borderRadius: BorderRadius.circular(8),
       ),
       child: DropdownButtonHideUnderline(
         child: DropdownButton<String>(
           isExpanded: true,
           value: _selectedSymbol,
-          dropdownColor: isDarkMode ? Colors.grey[900] : Colors.white,
-          items: _userStocks.map((s) {
+          dropdownColor: isDark ? Colors.grey[900] : Colors.white,
+          items: _userStocks.map<DropdownMenuItem<String>>((s) {
             return DropdownMenuItem<String>(
-              value: s['symbol'],
-              child: Text(
-                "${s['symbol']}", 
-                style: TextStyle(fontWeight: FontWeight.bold, color: isDarkMode ? Colors.white : Colors.black)
-              ),
+              value: s['symbol'].toString(),
+              child: Text(s['symbol'].toString(), style: TextStyle(fontWeight: FontWeight.bold, color: isDark ? Colors.white : Colors.black)),
             );
           }).toList(),
           onChanged: (val) {
@@ -307,124 +241,150 @@ class _RiskDashboardState extends State<RiskDashboard> {
     );
   }
 
-  Widget _buildRiskScoreCard(bool isDarkMode) {
-    Color color = _portfolioRiskScore > 70 ? Colors.red : (_portfolioRiskScore > 30 ? Colors.orange : Colors.green);
-    String label = _portfolioRiskScore > 70 ? "High Exposure" : (_portfolioRiskScore > 30 ? "Moderate" : "Safe Zone");
-    Color textColor = isDarkMode ? Colors.white : Colors.black87;
+  Widget _buildRiskScoreCard(BuildContext context) {
+    Color color = _portfolioRiskScore > 70 ? Colors.red : (_portfolioRiskScore < 30 ? Colors.green : Colors.orange);
+    String label = _portfolioRiskScore > 70 ? "High Risk" : (_portfolioRiskScore < 30 ? "Oversold" : "Neutral");
 
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: color.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(color: color.withOpacity(0.5)),
-        borderRadius: BorderRadius.circular(15),
       ),
       child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text("Portfolio Risk Score", style: TextStyle(color: textColor.withOpacity(0.7))),
-                const SizedBox(height: 5),
-                Text("${_portfolioRiskScore.toStringAsFixed(1)}", 
-                  style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: color)),
-                Text(label, style: TextStyle(fontWeight: FontWeight.bold, color: color)),
-              ],
-            ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Text("Technical Exposure", style: TextStyle(fontSize: 14)),
+                  // INSIGHT BUTTON FOR RISK SCORE
+                  GestureDetector(
+                    onTap: () => _showInsight(
+                      "Technical Exposure", 
+                      "An overall summary of the stock's current state based on RSI and Momentum.", 
+                      "• High Risk (>70): The stock is expensive. Consider selling or waiting.\n• Oversold (<30): The stock is cheap. Good buying opportunity.\n• Neutral: No clear signal."
+                    ),
+                    child: const Padding(
+                      padding: EdgeInsets.only(left: 6),
+                      child: Icon(Icons.info_outline, size: 16, color: Colors.grey),
+                    ),
+                  )
+                ],
+              ),
+              Text(label, style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: color)),
+            ],
           ),
-          SizedBox(
-            height: 60, width: 60,
-            child: CircularProgressIndicator(
-              value: _portfolioRiskScore / 100, 
-              color: color, 
-              backgroundColor: isDarkMode ? Colors.grey[800] : Colors.white,
-              strokeWidth: 8,
-            ),
-          ),
+          Stack(
+            alignment: Alignment.center,
+            children: [
+              SizedBox(
+                width: 60, height: 60,
+                child: CircularProgressIndicator(value: _portfolioRiskScore / 100, color: color, strokeWidth: 6),
+              ),
+              Text(_portfolioRiskScore.toInt().toString(), style: TextStyle(fontWeight: FontWeight.bold, color: color)),
+            ],
+          )
         ],
       ),
     );
   }
 
-  Widget _buildRsiCard(bool isDarkMode) {
-    double rsi = _metrics('rsi') as double? ?? 50.0;
-    String status = rsi > 70 ? "Overbought" : (rsi < 30 ? "Oversold" : "Neutral");
-    Color color = rsi > 70 ? Colors.red : (rsi < 30 ? Colors.green : Colors.orange);
-    Color cardColor = isDarkMode ? Colors.grey[900]! : Colors.white;
-    Color textColor = isDarkMode ? Colors.white : Colors.black87;
-
+  Widget _buildMetricCard(BuildContext context, String title, String value, Color color, String subtitle, String insightTitle, String def, String strat) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Card(
-      color: cardColor,
+      color: isDark ? Colors.grey[900] : Colors.white,
       margin: const EdgeInsets.only(bottom: 12),
+      elevation: 2,
       child: ListTile(
-        leading: CircleAvatar(backgroundColor: color.withOpacity(0.2), child: Text("RSI", style: TextStyle(color: color, fontSize: 10))),
-        title: Text("Relative Strength", style: TextStyle(color: textColor)),
-        subtitle: Text(status, style: TextStyle(color: color, fontWeight: FontWeight.bold)),
-        trailing: Text(rsi.toStringAsFixed(1), style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: textColor)),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+        title: Row(
+          children: [
+            Text(title, style: const TextStyle(fontWeight: FontWeight.w500)),
+            // INSIGHT BUTTON FOR METRICS
+            GestureDetector(
+              onTap: () => _showInsight(insightTitle, def, strat),
+              child: Padding(
+                padding: const EdgeInsets.only(left: 8),
+                child: Icon(Icons.info_outline, size: 18, color: Colors.grey.shade400),
+              ),
+            ),
+          ],
+        ),
+        subtitle: Text(subtitle, style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+        trailing: Text(value, style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: color)),
       ),
     );
   }
 
-  Widget _buildMacdCard(bool isDarkMode) {
-    final macdData = _metrics('macd'); 
-    if (macdData == null) return const SizedBox.shrink();
-
-    double histogram = macdData['histogram'];
-    bool bullish = histogram > 0;
-    Color cardColor = isDarkMode ? Colors.grey[900]! : Colors.white;
-    Color textColor = isDarkMode ? Colors.white : Colors.black87;
+  Widget _buildBollingerCard(BuildContext context) {
+    final bands = _metrics['bollinger'];
+    if (bands == null) return const SizedBox.shrink();
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Card(
-      color: cardColor,
+      color: isDark ? Colors.grey[900] : Colors.white,
       margin: const EdgeInsets.only(bottom: 12),
+      elevation: 2,
       child: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Column(
           children: [
-            Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-               Text("MACD Momentum", style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500, color: textColor)),
-               Text(bullish ? "BULLISH" : "BEARISH", 
-                style: TextStyle(fontWeight: FontWeight.bold, color: bullish ? Colors.green : Colors.red))
+            Row(children: [
+              const Icon(Icons.graphic_eq, color: Colors.blueGrey), 
+              const SizedBox(width: 8), 
+              const Text("Bollinger Bands (20D)", style: TextStyle(fontWeight: FontWeight.bold)),
+              // INSIGHT BUTTON FOR BOLLINGER
+              GestureDetector(
+                onTap: () => _showInsight(
+                  "Bollinger Bands", 
+                  "Elastic bands around the price. Prices hate being outside these bands (The 'Rubber Band' Effect).", 
+                  "• Price hits Upper Band: Overextended. Expect a pullback (Sell).\n• Price hits Lower Band: Overextended. Expect a bounce (Buy)."
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.only(left: 8),
+                  child: Icon(Icons.info_outline, size: 18, color: Colors.grey.shade400),
+                ),
+              ),
             ]),
+            const SizedBox(height: 15),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                _bandColumn("Upper", bands['upper'], Colors.red, isDark),
+                _bandColumn("Middle", bands['middle'], Colors.blue, isDark),
+                _bandColumn("Lower", bands['lower'], Colors.green, isDark),
+              ],
+            )
           ],
         ),
       ),
     );
   }
 
-  Widget _buildBollingerCard(bool isDarkMode) {
-    final b = _metrics('bollinger');
-    if (b == null) return const SizedBox.shrink();
-    
-    Color cardColor = isDarkMode ? Colors.grey[900]! : Colors.white;
-    Color textColor = isDarkMode ? Colors.white : Colors.black87;
-
-    return Card(
-      color: cardColor,
-      margin: const EdgeInsets.only(bottom: 12),
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text("Bollinger Bands", style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500, color: textColor)),
-            Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-              Text("Upper: ${b['upper']?.toStringAsFixed(2)}", style: const TextStyle(color: Colors.red, fontSize: 12)),
-              Text("Lower: ${b['lower']?.toStringAsFixed(2)}", style: const TextStyle(color: Colors.green, fontSize: 12)),
-            ]),
-          ],
-        ),
-      ),
+  Widget _bandColumn(String label, double? value, Color color, bool isDark) {
+    return Column(
+      children: [
+        Text(label, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+        Text(value?.toStringAsFixed(2) ?? "-", style: TextStyle(fontWeight: FontWeight.bold, color: color, fontSize: 16)),
+      ],
     );
   }
-  
-  Widget _buildAtrCard(bool isDarkMode) {
-     return const SizedBox.shrink(); // Simplify for brevity if not selected
+
+  Color _getRsiColor(double? rsi) {
+    if (rsi == null) return Colors.grey;
+    if (rsi > 70) return Colors.red;
+    if (rsi < 30) return Colors.green;
+    return Colors.orange;
   }
 
-  // Helper to safely get metrics
-  dynamic _metrics(String key) {
-    return _currentStockMetrics[key];
+  String _getRsiStatus(double? rsi) {
+    if (rsi == null) return "-";
+    if (rsi > 70) return "Overbought";
+    if (rsi < 30) return "Oversold";
+    return "Neutral";
   }
 }

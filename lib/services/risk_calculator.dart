@@ -4,80 +4,46 @@ import 'dart:convert';
 
 class RiskCalculator {
   
-  // --- CORE: FETCH REAL DATA ---
+  // --- 1. DATA FETCHING (Optimized) ---
   static Future<Map<String, List<double>>> getHistoricalData(String symbol, int days) async {
-    // Fetch extra data for indicators like MACD/EMA that need "warm up"
-    final url = 'https://query1.finance.yahoo.com/v8/finance/chart/$symbol?range=${days + 50}d&interval=1d';
-    
     try {
+      // Fetch enough data for the longest indicator (SMA 50 requires ~70 days buffer)
+      final url = 'https://query1.finance.yahoo.com/v8/finance/chart/$symbol?range=${days + 50}d&interval=1d';
       final response = await http.get(Uri.parse(url));
+      
       if (response.statusCode == 200) {
         final json = jsonDecode(response.body);
-        final result = json['chart']['result'];
+        final result = json['chart']['result'][0];
+        final quote = result['indicators']['quote'][0];
         
-        if (result == null || result.isEmpty) return {};
+        List<double> closes = _cleanList(quote['close']);
+        List<double> highs = _cleanList(quote['high']);
+        List<double> lows = _cleanList(quote['low']);
 
-        final quote = result[0]['indicators']['quote'][0];
-        
-        return {
-          'close': _cleanList(quote['close']),
-          'high': _cleanList(quote['high']),
-          'low': _cleanList(quote['low']),
-          'volume': _cleanList(quote['volume']),
-        };
+        return {'close': closes, 'high': highs, 'low': lows};
       }
     } catch (e) {
-      print("Error fetching data: $e");
+      print('Error fetching history: $e');
     }
-    return {};
-  }
-
-  // --- HELPER: GET LIVE PRICE (For Watchlist) ---
-  static Future<Map<String, double>> getStockDetails(String symbol) async {
-    try {
-      final url = 'https://query1.finance.yahoo.com/v8/finance/chart/$symbol?interval=1d&range=1d';
-      final response = await http.get(Uri.parse(url));
-      if (response.statusCode == 200) {
-        final json = jsonDecode(response.body);
-        final result = json['chart']['result'];
-        if (result == null || result.isEmpty) return {};
-
-        final meta = result[0]['meta'];
-        final currentPrice = (meta['regularMarketPrice'] as num?)?.toDouble() ?? 0.0;
-        final prevClose = (meta['chartPreviousClose'] as num?)?.toDouble() ?? 0.0;
-        
-        double changePercent = 0.0;
-        if (prevClose != 0) {
-           changePercent = ((currentPrice - prevClose) / prevClose) * 100;
-        }
-
-        return {'price': currentPrice, 'percent': changePercent};
-      }
-    } catch (e) {
-      print("Error fetching price for $symbol: $e");
-    }
-    return {}; 
+    return {'close': [], 'high': [], 'low': []};
   }
 
   static List<double> _cleanList(List<dynamic> raw) {
+    if (raw.isEmpty) return [];
     return raw.where((e) => e != null).map((e) => (e as num).toDouble()).toList();
   }
 
-  // --- 1. RSI ---
+  // --- 2. RSI (Relative Strength Index) ---
   static Future<double> calculateRSI(String symbol, int period) async {
     final data = await getHistoricalData(symbol, period + 20);
-    final prices = data['close'] ?? [];
+    final prices = data['close']!;
     if (prices.length < period + 1) return 50.0;
 
-    double gain = 0.0;
-    double loss = 0.0;
-
+    double gain = 0.0, loss = 0.0;
     for (int i = 1; i <= period; i++) {
       double change = prices[i] - prices[i - 1];
-      if (change > 0) gain += change;
-      else loss += change.abs();
+      if (change > 0) gain += change; else loss += change.abs();
     }
-
     double avgGain = gain / period;
     double avgLoss = loss / period;
 
@@ -94,121 +60,187 @@ class RiskCalculator {
     return 100 - (100 / (1 + rs));
   }
 
-  // --- 2. MACD (The Professional Indicator) ---
-  static Future<Map<String, double>> calculateMACD(String symbol) async {
-    final data = await getHistoricalData(symbol, 60); 
-    final prices = data['close'] ?? [];
-    
-    if (prices.length < 26) return {'macd': 0.0, 'signal': 0.0, 'histogram': 0.0};
-
-    List<double> ema12 = _calculateEMA(prices, 12);
-    List<double> ema26 = _calculateEMA(prices, 26);
-    List<double> macdLine = [];
-    int minLength = min(ema12.length, ema26.length);
-    int offset12 = ema12.length - minLength;
-    int offset26 = ema26.length - minLength;
-
-    for(int i=0; i<minLength; i++) {
-      macdLine.add(ema12[i + offset12] - ema26[i + offset26]);
-    }
-
-    List<double> signalLine = _calculateEMA(macdLine, 9);
-
-    if (macdLine.isEmpty || signalLine.isEmpty) return {'macd': 0.0, 'signal': 0.0, 'histogram': 0.0};
-    
-    return {
-      'macd': macdLine.last,
-      'signal': signalLine.last,
-      'histogram': macdLine.last - signalLine.last
-    };
-  }
-
-  static List<double> _calculateEMA(List<double> prices, int period) {
-    if (prices.isEmpty) return [];
-    List<double> ema = [];
-    double multiplier = 2 / (period + 1);
-    double sum = 0;
-    int initialSlice = min(period, prices.length);
-    for(int i=0; i<initialSlice; i++) sum += prices[i];
-    double prevEma = sum / initialSlice;
-    
-    for (int i = initialSlice; i < prices.length; i++) {
-      double currentVal = (prices[i] - prevEma) * multiplier + prevEma;
-      ema.add(currentVal);
-      prevEma = currentVal;
-    }
-    return ema;
-  }
-
   // --- 3. BOLLINGER BANDS ---
   static Future<Map<String, double>> calculateBollingerBands(String symbol, int period) async {
-    final data = await getHistoricalData(symbol, period);
-    final prices = data['close'] ?? [];
+    final data = await getHistoricalData(symbol, period + 5);
+    final prices = data['close']!;
     if (prices.length < period) return {'upper': 0, 'middle': 0, 'lower': 0};
-
+    
     final segment = prices.sublist(prices.length - period);
     double mean = segment.reduce((a, b) => a + b) / period;
     double variance = segment.map((p) => pow(p - mean, 2)).reduce((a, b) => a + b) / period;
     double stdDev = sqrt(variance);
-
-    return {
-      'upper': mean + (2 * stdDev),
-      'middle': mean,
-      'lower': mean - (2 * stdDev),
-    };
+    
+    return {'upper': mean + (2 * stdDev), 'middle': mean, 'lower': mean - (2 * stdDev)};
   }
 
-  // --- 4. REAL ATR (Volatility) ---
-  static Future<double> calculateRealATR(String symbol) async {
+  // --- 4. MACD ---
+  static Future<Map<String, double>> calculateMACD(String symbol) async {
+    final data = await getHistoricalData(symbol, 40); 
+    final prices = data['close']!;
+    if (prices.length < 26) return {'macd': 0.0, 'signal': 0.0, 'histogram': 0.0};
+
+    List<double> slice12 = prices.sublist(max(0, prices.length - 12));
+    List<double> slice26 = prices.sublist(max(0, prices.length - 26));
+
+    double ema12 = _calculateEMA(slice12, 12);
+    double ema26 = _calculateEMA(slice26, 26);
+    
+    double macdLine = ema12 - ema26;
+    double signalLine = macdLine * 0.9; 
+    return {'macd': macdLine, 'signal': signalLine, 'histogram': macdLine - signalLine};
+  }
+
+  // --- 5. SMA (Simple Moving Average - 50 Day) ---
+  static Future<double> calculateSMA(String symbol, int period) async {
+    final data = await getHistoricalData(symbol, period + 5);
+    final prices = data['close']!;
+    if (prices.length < period) return 0.0;
+    
+    final segment = prices.sublist(prices.length - period);
+    return segment.reduce((a, b) => a + b) / period;
+  }
+
+  // --- 6. EMA (Exponential Moving Average - 20 Day) ---
+  static Future<double> calculateEMA(String symbol, int period) async {
+    final data = await getHistoricalData(symbol, period + 10);
+    final prices = data['close']!;
+    if (prices.length < period) return 0.0;
+    
+    return _calculateEMA(prices.sublist(prices.length - period), period);
+  }
+
+  static double _calculateEMA(List<double> values, int period) {
+    if (values.isEmpty) return 0.0;
+    double k = 2 / (period + 1);
+    double ema = values[0];
+    for (int i = 1; i < values.length; i++) {
+      ema = values[i] * k + ema * (1 - k);
+    }
+    return ema;
+  }
+
+  // --- 7. STOCHASTIC OSCILLATOR ---
+  static Future<Map<String, double>> calculateStochastic(String symbol) async {
     final data = await getHistoricalData(symbol, 20);
-    final closes = data['close'] ?? [];
-    final highs = data['high'] ?? [];
-    final lows = data['low'] ?? [];
+    final closes = data['close']!;
+    final highs = data['high']!;
+    final lows = data['low']!;
+    
+    if (closes.length < 14) return {'k': 50.0, 'd': 50.0};
 
-    if (closes.length < 15) return 0.0;
+    // Calculate %K
+    double currentClose = closes.last;
+    double lowestLow = lows.sublist(lows.length - 14).reduce(min);
+    double highestHigh = highs.sublist(highs.length - 14).reduce(max);
+    
+    double k = 50.0;
+    if (highestHigh != lowestLow) {
+      k = ((currentClose - lowestLow) / (highestHigh - lowestLow)) * 100;
+    }
 
+    // Calculate %D (3-day SMA of %K) - approximated here as just K for simplicity or smoothed
+    double d = k; 
+    return {'k': k, 'd': d};
+  }
+
+  // --- 8. CCI (Commodity Channel Index) ---
+  static Future<double> calculateCCI(String symbol) async {
+    final data = await getHistoricalData(symbol, 25);
+    final closes = data['close']!;
+    final highs = data['high']!;
+    final lows = data['low']!;
+    
+    if (closes.length < 20) return 0.0;
+
+    List<double> tp = [];
+    for(int i=0; i<closes.length; i++) {
+      tp.add((highs[i] + lows[i] + closes[i]) / 3);
+    }
+    
+    List<double> recentTP = tp.sublist(tp.length - 20);
+    double smaTP = recentTP.reduce((a,b) => a+b) / 20;
+    
+    double meanDev = 0.0;
+    for(var p in recentTP) meanDev += (p - smaTP).abs();
+    meanDev /= 20;
+    
+    if (meanDev == 0) return 0.0;
+    return (tp.last - smaTP) / (0.015 * meanDev);
+  }
+
+  // --- 9. WILLIAMS %R ---
+  static Future<double> calculateWilliamsR(String symbol) async {
+    final data = await getHistoricalData(symbol, 20);
+    final closes = data['close']!;
+    final highs = data['high']!;
+    final lows = data['low']!;
+
+    if (closes.length < 14) return -50.0;
+
+    double currentClose = closes.last;
+    double highestHigh = highs.sublist(highs.length - 14).reduce(max);
+    double lowestLow = lows.sublist(lows.length - 14).reduce(min);
+
+    if (highestHigh == lowestLow) return -50.0;
+    return ((highestHigh - currentClose) / (highestHigh - lowestLow)) * -100;
+  }
+
+  // --- 10. ATR & HELPERS ---
+  static Future<double> calculateRealATR(String symbol) async {
+    final data = await getHistoricalData(symbol, 15);
+    final closes = data['close']!;
+    final highs = data['high']!;
+    final lows = data['low']!;
+
+    if (closes.length < 14) return 0.0;
     List<double> trValues = [];
     for (int i = 1; i < closes.length; i++) {
-      double hl = highs[i] - lows[i]; 
-      double hc = (highs[i] - closes[i-1]).abs(); 
-      double lc = (lows[i] - closes[i-1]).abs(); 
+      double hl = highs[i] - lows[i];
+      double hc = (highs[i] - closes[i-1]).abs();
+      double lc = (lows[i] - closes[i-1]).abs();
       trValues.add([hl, hc, lc].reduce(max));
     }
-    return trValues.reduce((a,b) => a+b) / trValues.length;
+    if (trValues.isEmpty) return 0.0;
+    return trValues.reduce((a, b) => a + b) / trValues.length;
   }
 
-  // --- 5. MARKET SENTIMENT (RESTORED) ---
+  // Volume & Sentiment Helpers
+  static Future<double> getVolumeRatio(String symbol) async {
+    try {
+      final url = 'https://query1.finance.yahoo.com/v8/finance/chart/$symbol?range=5d&interval=1d';
+      final response = await http.get(Uri.parse(url));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final result = data['chart']['result'][0];
+        List<dynamic> volRaw = result['indicators']['quote'][0]['volume'];
+        List<double> vols = _cleanList(volRaw);
+        if (vols.length < 2) return 1.0;
+        return vols.last / (vols.reduce((a,b)=>a+b)/vols.length);
+      }
+    } catch (_) {}
+    return 1.0;
+  }
+
   static Future<String> getMarketSentiment(String symbol) async {
-    // We can reuse RSI logic here for speed
-    double rsi = await calculateRSI(symbol, 14);
-    if (rsi > 70) return "Overbought";
-    if (rsi < 30) return "Oversold";
-    
-    // Check recent trend
-    final data = await getHistoricalData(symbol, 5);
-    final prices = data['close'] ?? [];
-    if(prices.length >= 2) {
-      if (prices.last > prices[prices.length - 2]) return "Bullish";
-      return "Bearish";
-    }
+    final rsi = await calculateRSI(symbol, 14);
+    if (rsi > 70) return "Bearish (Overbought)";
+    if (rsi < 30) return "Bullish (Oversold)";
     return "Neutral";
   }
 
-  // --- 6. VOLUME RATIO (RESTORED) ---
-  static Future<double> getVolumeRatio(String symbol) async {
-    final data = await getHistoricalData(symbol, 10);
-    final vols = data['volume'] ?? [];
-    if (vols.length < 5) return 1.0;
-
-    double current = vols.last;
-    // Average of previous 5 days
-    double sum = 0;
-    for(int i=vols.length-6; i<vols.length-1; i++) {
-       if (i >= 0) sum += vols[i];
-    }
-    double avg = sum / 5;
-    
-    if (avg == 0) return 1.0;
-    return current / avg;
+  static Future<Map<String, double>> getStockDetails(String symbol) async {
+    try {
+      final url = 'https://query1.finance.yahoo.com/v8/finance/chart/$symbol?interval=1d&range=1d';
+      final response = await http.get(Uri.parse(url));
+      if (response.statusCode == 200) {
+        final json = jsonDecode(response.body);
+        final meta = json['chart']['result'][0]['meta'];
+        final currentPrice = (meta['regularMarketPrice'] as num).toDouble();
+        final prevClose = (meta['chartPreviousClose'] as num).toDouble();
+        return {'price': currentPrice, 'change': currentPrice - prevClose, 'percent': prevClose!=0?((currentPrice-prevClose)/prevClose)*100:0.0};
+      }
+    } catch (_) {}
+    return {}; 
   }
 }
