@@ -57,11 +57,16 @@ class _RiskDashboardState extends State<RiskDashboard> {
 
     try {
       final symbol = _selectedSymbol!;
+
+      // Calculate ALL indicators
       final results = await Future.wait([
-        RiskCalculator.calculateRSI(symbol, 14),           
-        RiskCalculator.calculateBollingerBands(symbol, 20),
-        RiskCalculator.getVolumeRatio(symbol),             
-        RiskCalculator.calculateRealATR(symbol),           
+        RiskCalculator.calculateRSI(symbol, 14),           // 0
+        RiskCalculator.calculateBollingerBands(symbol, 20),// 1
+        RiskCalculator.getVolumeRatio(symbol),             // 2
+        RiskCalculator.calculateRealATR(symbol),           // 3
+        RiskCalculator.calculateSMA(symbol, 50),           // 4 (SMA)
+        RiskCalculator.calculateEMA(symbol, 20),           // 5 (EMA)
+        RiskCalculator.calculateMACD(symbol),              // 6 (MACD)
       ]);
 
       if (mounted) {
@@ -71,7 +76,11 @@ class _RiskDashboardState extends State<RiskDashboard> {
             'bollinger': results[1],
             'volume': results[2],
             'atr': results[3],
+            'sma': results[4],
+            'ema': results[5],
+            'macd': results[6],      
           };
+          
           _portfolioRiskScore = (results[0] as double); 
           _isLoading = false;
         });
@@ -81,7 +90,7 @@ class _RiskDashboardState extends State<RiskDashboard> {
     }
   }
 
-  // --- NEW: INSIGHT POP-UP LOGIC ---
+  // INSIGHT POP-UP LOGIC 
   void _showInsight(String title, String definition, String strategy) {
     showModalBottomSheet(
       context: context,
@@ -154,17 +163,15 @@ class _RiskDashboardState extends State<RiskDashboard> {
 
                 const SizedBox(height: 20),
 
-                // --- RISK SCORE WITH INSIGHT ---
+                // --- RISK SCORE ---
                 _buildRiskScoreCard(context),
                 
                 const SizedBox(height: 20),
                 const Divider(),
                 const SizedBox(height: 10),
-                Text("Core Metrics", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: textColor)),
+                Text("Technical Analysis", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: textColor)),
                 const SizedBox(height: 15),
 
-                // --- METRICS WITH INSIGHTS ---
-                
                 // 1. RSI
                 _buildMetricCard(
                   context, 
@@ -188,7 +195,7 @@ class _RiskDashboardState extends State<RiskDashboard> {
                   (_metrics['volume'] ?? 0) > 1.5 ? Colors.purple : Colors.blueGrey, 
                   "Relative to 5-Day Avg",
                   "Volume Insight",
-                  "Compares today's trading activity to the average of the last 5 days (The 'Hype Meter').",
+                  "Compares today's trading activity to the average of the last 5 days.",
                   "• High Ratio (> 2.0): Big news or big move happening.\n• Low Ratio (< 1.0): Quiet day, price moves might be fake."
                 ),
 
@@ -200,9 +207,37 @@ class _RiskDashboardState extends State<RiskDashboard> {
                   Colors.teal, 
                   "Expected Daily Move",
                   "ATR Insight",
-                  "Average True Range. It tells you how many dollars this stock moves in a single day.",
-                  "• Use this for Stop Losses.\n• Example: If ATR is \$5, set your stop loss \$5 below your buy price to avoid getting stopped out by random noise."
+                  "Average True Range. Tells you how many dollars this stock moves in a day.",
+                  "• Use this for Stop Losses.\n• Example: If ATR is \$5, set your stop loss \$5 below your buy price."
                 ),
+
+                // 5. SMA (Simple Moving Average)
+                _buildMetricCard(
+                  context,
+                  "SMA (50-Day)",
+                  "\$${(_metrics['sma'] ?? 0).toStringAsFixed(2)}",
+                  Colors.blue,
+                  "Long-Term Baseline",
+                  "SMA Insight",
+                  "The average price over the last 50 days. It smooths out noise.",
+                  "• Price ABOVE SMA: The long-term trend is UP (Bullish).\n• Price BELOW SMA: The long-term trend is DOWN (Bearish)."
+                ),
+
+                // 6. EMA (Exponential Moving Average)
+                _buildMetricCard(
+                  context,
+                  "EMA (20-Day)",
+                  "\$${(_metrics['ema'] ?? 0).toStringAsFixed(2)}",
+                  Colors.purple,
+                  "Short-Term Trend",
+                  "EMA Insight",
+                  "Reacts faster to recent price changes than the SMA.",
+                  "• Watch for the 'Crossover': If the EMA crosses above the SMA, it is often a strong BUY signal (Golden Cross)."
+                ),
+
+                // 7. MACD (Momentum)
+                _buildMacdCard(context),
+
               ],
             ),
           ),
@@ -261,12 +296,11 @@ class _RiskDashboardState extends State<RiskDashboard> {
               Row(
                 children: [
                   const Text("Technical Exposure", style: TextStyle(fontSize: 14)),
-                  // INSIGHT BUTTON FOR RISK SCORE
                   GestureDetector(
                     onTap: () => _showInsight(
                       "Technical Exposure", 
                       "An overall summary of the stock's current state based on RSI and Momentum.", 
-                      "• High Risk (>70): The stock is expensive. Consider selling or waiting.\n• Oversold (<30): The stock is cheap. Good buying opportunity.\n• Neutral: No clear signal."
+                      "• High Risk (>70): The stock is expensive. Consider selling.\n• Oversold (<30): The stock is cheap. Good buying opportunity."
                     ),
                     child: const Padding(
                       padding: EdgeInsets.only(left: 6),
@@ -304,7 +338,6 @@ class _RiskDashboardState extends State<RiskDashboard> {
         title: Row(
           children: [
             Text(title, style: const TextStyle(fontWeight: FontWeight.w500)),
-            // INSIGHT BUTTON FOR METRICS
             GestureDetector(
               onTap: () => _showInsight(insightTitle, def, strat),
               child: Padding(
@@ -337,12 +370,11 @@ class _RiskDashboardState extends State<RiskDashboard> {
               const Icon(Icons.graphic_eq, color: Colors.blueGrey), 
               const SizedBox(width: 8), 
               const Text("Bollinger Bands (20D)", style: TextStyle(fontWeight: FontWeight.bold)),
-              // INSIGHT BUTTON FOR BOLLINGER
               GestureDetector(
                 onTap: () => _showInsight(
                   "Bollinger Bands", 
-                  "Elastic bands around the price. Prices hate being outside these bands (The 'Rubber Band' Effect).", 
-                  "• Price hits Upper Band: Overextended. Expect a pullback (Sell).\n• Price hits Lower Band: Overextended. Expect a bounce (Buy)."
+                  "Elastic bands around the price. Prices hate being outside these bands.", 
+                  "• Price hits Upper Band: Overextended (Sell).\n• Price hits Lower Band: Overextended (Buy)."
                 ),
                 child: Padding(
                   padding: const EdgeInsets.only(left: 8),
@@ -357,6 +389,53 @@ class _RiskDashboardState extends State<RiskDashboard> {
                 _bandColumn("Upper", bands['upper'], Colors.red, isDark),
                 _bandColumn("Middle", bands['middle'], Colors.blue, isDark),
                 _bandColumn("Lower", bands['lower'], Colors.green, isDark),
+              ],
+            )
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMacdCard(BuildContext context) {
+    final macdData = _metrics['macd'];
+    if (macdData == null) return const SizedBox.shrink();
+
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    double histogram = macdData['histogram'] ?? 0.0;
+    bool isBullish = histogram > 0;
+
+    return Card(
+      color: isDark ? Colors.grey[900] : Colors.white,
+      margin: const EdgeInsets.only(bottom: 12),
+      elevation: 2,
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.waterfall_chart, color: Colors.purple),
+                const SizedBox(width: 8),
+                const Text("MACD Momentum", style: TextStyle(fontWeight: FontWeight.bold)),
+                const Spacer(),
+                GestureDetector(
+                  onTap: () => _showInsight(
+                    "MACD",
+                    "Moving Average Convergence Divergence. Spots reversals.",
+                    "Green Histogram = Bullish Momentum. Red = Bearish."
+                  ),
+                  child: Icon(Icons.info_outline, size: 18, color: Colors.grey.shade400),
+                ),
+              ],
+            ),
+            const SizedBox(height: 15),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                _bandColumn("MACD", macdData['macd'], Colors.purple, isDark),
+                _bandColumn("Signal", macdData['signal'], Colors.orange, isDark),
+                _bandColumn("Hist", histogram, isBullish ? Colors.green : Colors.red, isDark),
               ],
             )
           ],

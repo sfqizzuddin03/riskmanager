@@ -28,13 +28,12 @@ class _PositionManagementScreenState extends State<PositionManagementScreen> {
   }
 
   Future<void> _loadAssetsFromDatabase() async {
-    // This calls the "Legit" method we made in DatabaseService
+    // calls the method  DatabaseService
     final assets = await DatabaseService.getSupportedAssets();
     
     if (mounted) {
       setState(() {
-        _commonStocks = assets; // Now the dropdown is powered by Firestore!
-        // If the list is not empty, you might want to select the first one optionally
+        _commonStocks = assets; // Firestore integrated dropdown list
         // if (_commonStocks.isNotEmpty) _selectedSymbol = _commonStocks[0];
       });
     }

@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'screens/login_screen.dart';
+
 import 'screens/main_layout.dart';
+import 'screens/login_screen.dart';
 import 'services/theme_service.dart';
 import 'services/database_service.dart'; 
 
@@ -11,7 +13,7 @@ void main() async {
   await Firebase.initializeApp();
   
 
-  // Load saved theme preference
+  // theme preference
   final themeService = ThemeService();
   await themeService.loadTheme();
 
@@ -31,7 +33,7 @@ class InvestiveApp extends StatelessWidget {
           title: 'Investive',
           debugShowCheckedModeBanner: false,
           
-          // Define Professional Themes
+          // Define Themes
           themeMode: ThemeService().themeMode,
           theme: ThemeData(
             brightness: Brightness.light,

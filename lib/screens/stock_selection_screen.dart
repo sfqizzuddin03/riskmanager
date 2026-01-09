@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
-import 'main_screen.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'main_layout.dart'; // ✅ Point to the correct MainLayout
+import '../services/database_service.dart'; // ✅ Import your database service
 
 class StockSelectionScreen extends StatefulWidget {
   const StockSelectionScreen({super.key});
@@ -9,6 +11,8 @@ class StockSelectionScreen extends StatefulWidget {
 }
 
 class _StockSelectionScreenState extends State<StockSelectionScreen> {
+  bool _isSaving = false; // To show a loading spinner while saving
+
   final List<Map<String, dynamic>> _availableStocks = [
     {'symbol': 'AAPL', 'name': 'Apple Inc.', 'selected': false},
     {'symbol': 'MSFT', 'name': 'Microsoft Corporation', 'selected': false},
@@ -26,7 +30,8 @@ class _StockSelectionScreenState extends State<StockSelectionScreen> {
     });
   }
 
-  void _proceedToDashboard() {
+  // --- UPDATED LOGIC ---
+  Future<void> _proceedToDashboard() async {
     final selectedStocks = _availableStocks.where((stock) => stock['selected']).toList();
     
     if (selectedStocks.isEmpty) {
@@ -36,10 +41,28 @@ class _StockSelectionScreenState extends State<StockSelectionScreen> {
       return;
     }
 
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(builder: (context) => MainScreen(selectedStocks: selectedStocks)),
-    );
+    setState(() => _isSaving = true);
+
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user != null) {
+        // 1. Save directly to Firestore using your Service
+        // We extract just the symbol strings ['AAPL', 'MSFT']
+        List<String> symbols = selectedStocks.map((s) => s['symbol'] as String).toList();
+        await DatabaseService.saveWatchlist(user.uid, symbols);
+      }
+
+      // 2. Navigate to MainLayout (The new Home)
+      if (mounted) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (context) => const MainLayout()), 
+        );
+      }
+    } catch (e) {
+      print(e);
+      if (mounted) setState(() => _isSaving = false);
+    }
   }
 
   @override
@@ -87,11 +110,13 @@ class _StockSelectionScreenState extends State<StockSelectionScreen> {
             child: SizedBox(
               width: double.infinity,
               child: ElevatedButton(
-                onPressed: _proceedToDashboard,
+                onPressed: _isSaving ? null : _proceedToDashboard, // Disable if saving
                 style: ElevatedButton.styleFrom(
                   padding: const EdgeInsets.symmetric(vertical: 16),
                 ),
-                child: const Text('Start Risk Management'),
+                child: _isSaving 
+                  ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Text('Start Risk Management'),
               ),
             ),
           ),

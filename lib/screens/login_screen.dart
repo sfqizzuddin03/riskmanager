@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart'; // <--- FIXES "Undefined name FirebaseAuth"
-import '../services/database_service.dart';        // <--- FIXES "Undefined name DatabaseService"
-
+import 'package:firebase_auth/firebase_auth.dart';
+import '../services/database_service.dart';        
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
 
@@ -15,7 +14,7 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _isLogin = true; 
   bool _isLoading = false;
 
-  // --- AUTH LOGIC ---
+  // --- AUTHENTICATION---
   Future<void> _submitAuth() async {
     setState(() => _isLoading = true);
     try {
@@ -33,8 +32,7 @@ class _LoginScreenState extends State<LoginScreen> {
         );
       }
 
-      // Sync user data to Firestore (The "Legit" step)
-      // This will now work because we fixed DatabaseService in Step 1
+      // Sync user data to Firestore 
       if (FirebaseAuth.instance.currentUser != null) {
         await DatabaseService.syncUserData(FirebaseAuth.instance.currentUser!);
       }
@@ -48,7 +46,7 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  // --- FORGOT PASSWORD LOGIC ---
+  // --- FORGOT PASSWORD ---
   Future<void> _resetPassword() async {
     if (_emailController.text.isEmpty) {
       _showError("Please enter your email address first.");
@@ -98,7 +96,7 @@ class _LoginScreenState extends State<LoginScreen> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                // --- 1. LOGO & BRANDING ---
+                // --- LOGO & BRANDING ---
                 Container(
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
@@ -123,7 +121,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
                 const SizedBox(height: 50),
 
-                // --- 2. INPUT CARD ---
+                // --- INPUT CARD ---
                 Container(
                   padding: const EdgeInsets.all(30),
                   decoration: BoxDecoration(
@@ -151,7 +149,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       
                       // Email Field
                       TextField(
-                        controller: _emailController,
+                        controller: _emailController,//CONNECTING TO EMAILCONTROLLER (LINE 12)
                         keyboardType: TextInputType.emailAddress,
                         decoration: InputDecoration(
                           labelText: "Email Address",
@@ -167,7 +165,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
                       // Password Field
                       TextField(
-                        controller: _passwordController,
+                        controller: _passwordController,//CONNECTING TO PASSWORDCONTROLLER (LINE 13)
                         obscureText: true,
                         decoration: InputDecoration(
                           labelText: "Password",
@@ -216,7 +214,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                 ),
 
-                // --- 3. TOGGLE BUTTON ---
+                // --- TOGGLE BUTTON ---
                 const SizedBox(height: 20),
                 TextButton(
                   onPressed: () => setState(() => _isLogin = !_isLogin),
