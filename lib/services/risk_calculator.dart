@@ -4,7 +4,7 @@ import 'dart:convert';
 
 class RiskCalculator {
   
-  // --- 1. DATA FETCHING (Optimized) ---
+  // --- 1. DATA FETCHING ---
   static Future<Map<String, List<double>>> getHistoricalData(String symbol, int days) async {
     try {
       // Fetch enough data for the longest indicator (SMA 50 requires ~70 days buffer)

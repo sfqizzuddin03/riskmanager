@@ -105,8 +105,8 @@ class SecurityScreen extends StatelessWidget {
               }
             },
           ),
-        ], // <--- FIXED: This closing bracket was missing or misplaced
-      ),
+        ], 
+      )
     );
   }
 

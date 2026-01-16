@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import '../models/stock.dart';
 
 class SearchScreen extends StatelessWidget {
   const SearchScreen({super.key});

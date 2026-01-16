@@ -15,13 +15,13 @@ class AuthService {
     }
   }
 
-  // 2. Register (Creates New User in Firebase)
+  // Register user 
   Future<bool> register(String email, String password, double initialCapital) async {
     try {
       await _auth.createUserWithEmailAndPassword(email: email, password: password);
       await _saveUserLocally(email);
       
-      // Save initial capital locally (or you can use Firestore later)
+      // Save initial capital locally 
       final prefs = await SharedPreferences.getInstance();
       await prefs.setDouble('initial_capital', initialCapital);
       
