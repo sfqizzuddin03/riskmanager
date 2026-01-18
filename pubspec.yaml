@@ -25,6 +25,7 @@ dependencies:
   path_provider: ^2.1.5
   cloud_firestore: ^6.1.1
   webview_flutter: ^4.13.0
+  flutter_local_notifications: ^19.5.0
 
 dev_dependencies:
   flutter_test:

@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../services/database_service.dart';
 import '../services/risk_calculator.dart';
+import '../logic/risk_engine.dart'; 
+import '../services/notification_service.dart';
 
 class RiskDashboard extends StatefulWidget {
   const RiskDashboard({super.key});
@@ -51,7 +53,7 @@ class _RiskDashboardState extends State<RiskDashboard> {
     }
   }
 
-  Future<void> _analyzeSelectedStock() async {
+  /*Future<void> _analyzeSelectedStock() async {
     if (_selectedSymbol == null) return;
     setState(() => _isLoading = true);
 
@@ -86,6 +88,84 @@ class _RiskDashboardState extends State<RiskDashboard> {
         });
       }
     } catch (e) {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }*/
+
+  Future<void> _analyzeSelectedStock() async {
+    if (_selectedSymbol == null) return;
+    setState(() => _isLoading = true);
+
+    try {
+      final symbol = _selectedSymbol!;
+
+      // 1. Fetch ALL Indicators
+      final results = await Future.wait([
+        RiskCalculator.calculateRSI(symbol, 14),           // 0
+        RiskCalculator.calculateBollingerBands(symbol, 20),// 1
+        RiskCalculator.getVolumeRatio(symbol),             // 2
+        RiskCalculator.calculateRealATR(symbol),           // 3
+        RiskCalculator.calculateSMA(symbol, 50),           // 4
+        RiskCalculator.calculateEMA(symbol, 20),           // 5
+        RiskCalculator.calculateMACD(symbol),              // 6
+        RiskCalculator.getStockDetails(symbol),            // 7 (Price)
+      ]);
+
+      // 2. Extract Data variables
+      final rsi = results[0] as double;
+      final bands = results[1] as Map<String, double>;
+      final volRatio = results[2] as double;
+      final atr = results[3] as double;
+      final sma50 = results[4] as double;
+      final ema20 = results[5] as double;
+      final macd = results[6] as Map<String, double>;
+      final priceData = results[7] as Map<String, double>;
+      final currentPrice = priceData['price'] ?? 0.0;
+
+      // ====================================================
+      // 🔔 NOTIFICATION LOGIC (RESTORED)
+      // ====================================================
+      
+      // Step A: Ask the Risk Engine "Is this stock dangerous?"
+      List<String> warnings = RiskEngine().evaluateRisk(
+        symbol: symbol,
+        currentPrice: currentPrice,
+        sma50: sma50,
+        liveATR: atr,
+        historicalATR: 3.902, // Using the fixed benchmark for now
+        volumeRatio: volRatio,
+      );
+
+      // Step B: If the engine returns warnings, fire the notification
+      if (warnings.isNotEmpty) {
+        // We trigger the notification using the FIRST warning in the list
+        // e.g., Title: "Risk Alert: TSLA", Body: "Volatility Spike Detected!"
+        NotificationService.showNotification(
+          title: "Risk Alert: $symbol",
+          body: warnings.first, 
+        );
+        print("--- NOTIFICATION SENT: ${warnings.first} ---");
+      }
+      // ====================================================
+
+      if (mounted) {
+        setState(() {
+          _metrics = {
+            'rsi': rsi,
+            'bollinger': bands,
+            'volume': volRatio,
+            'atr': atr,
+            'sma': sma50,
+            'ema': ema20,
+            'macd': macd,      
+          };
+          
+          _portfolioRiskScore = rsi; 
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      print("Error analyzing stock: $e");
       if (mounted) setState(() => _isLoading = false);
     }
   }
