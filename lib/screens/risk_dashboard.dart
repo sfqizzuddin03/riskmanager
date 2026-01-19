@@ -17,7 +17,7 @@ class _RiskDashboardState extends State<RiskDashboard> {
   String? _selectedSymbol;
   Map<String, dynamic> _metrics = {};
   bool _isLoading = true;
-  double _portfolioRiskScore = 0.0;
+  double _portfolioRiskScore = 50.0; // Default to Neutral
 
   @override
   void initState() {
@@ -53,44 +53,46 @@ class _RiskDashboardState extends State<RiskDashboard> {
     }
   }
 
-  /*Future<void> _analyzeSelectedStock() async {
-    if (_selectedSymbol == null) return;
-    setState(() => _isLoading = true);
+  // --- ALGORITHM: COMPOSITE SCORING SYSTEM ---
+  double _calculateCompositeScore({
+    required double rsi,
+    required double sma50,
+    required double ema20,
+    required double currentPrice,
+    required double macdHist,
+  }) {
+    double score = 50.0; // Baseline: Neutral
 
-    try {
-      final symbol = _selectedSymbol!;
-
-      // Calculate ALL indicators
-      final results = await Future.wait([
-        RiskCalculator.calculateRSI(symbol, 14),           // 0
-        RiskCalculator.calculateBollingerBands(symbol, 20),// 1
-        RiskCalculator.getVolumeRatio(symbol),             // 2
-        RiskCalculator.calculateRealATR(symbol),           // 3
-        RiskCalculator.calculateSMA(symbol, 50),           // 4 (SMA)
-        RiskCalculator.calculateEMA(symbol, 20),           // 5 (EMA)
-        RiskCalculator.calculateMACD(symbol),              // 6 (MACD)
-      ]);
-
-      if (mounted) {
-        setState(() {
-          _metrics = {
-            'rsi': results[0],
-            'bollinger': results[1],
-            'volume': results[2],
-            'atr': results[3],
-            'sma': results[4],
-            'ema': results[5],
-            'macd': results[6],      
-          };
-          
-          _portfolioRiskScore = (results[0] as double); 
-          _isLoading = false;
-        });
-      }
-    } catch (e) {
-      if (mounted) setState(() => _isLoading = false);
+    // 1. Trend Analysis (Weight: 20 pts)
+    if (currentPrice > sma50) {
+      score += 10; // Bullish Trend
+    } else {
+      score -= 10; // Bearish Trend
     }
-  }*/
+
+    // 2. Momentum Analysis (Weight: 10 pts)
+    if (currentPrice > ema20) {
+      score += 5; 
+    } else {
+      score -= 5;
+    }
+
+    // 3. RSI Volatility (Weight: 20 pts)
+    if (rsi < 30) {
+      score += 15; // Oversold condition
+    } else if (rsi > 70) {
+      score -= 15; // Overbought condition
+    }
+
+    // 4. MACD Signal (Weight: 10 pts)
+    if (macdHist > 0) {
+      score += 5; 
+    } else {
+      score -= 5; 
+    }
+
+    return score.clamp(0.0, 100.0); 
+  }
 
   Future<void> _analyzeSelectedStock() async {
     if (_selectedSymbol == null) return;
@@ -99,19 +101,19 @@ class _RiskDashboardState extends State<RiskDashboard> {
     try {
       final symbol = _selectedSymbol!;
 
-      // 1. Fetch ALL Indicators
+      // 1. Fetch Indicators
       final results = await Future.wait([
-        RiskCalculator.calculateRSI(symbol, 14),           // 0
-        RiskCalculator.calculateBollingerBands(symbol, 20),// 1
-        RiskCalculator.getVolumeRatio(symbol),             // 2
-        RiskCalculator.calculateRealATR(symbol),           // 3
-        RiskCalculator.calculateSMA(symbol, 50),           // 4
-        RiskCalculator.calculateEMA(symbol, 20),           // 5
-        RiskCalculator.calculateMACD(symbol),              // 6
-        RiskCalculator.getStockDetails(symbol),            // 7 (Price)
+        RiskCalculator.calculateRSI(symbol, 14),           
+        RiskCalculator.calculateBollingerBands(symbol, 20),
+        RiskCalculator.getVolumeRatio(symbol),             
+        RiskCalculator.calculateRealATR(symbol),           
+        RiskCalculator.calculateSMA(symbol, 50),           
+        RiskCalculator.calculateEMA(symbol, 20),           
+        RiskCalculator.calculateMACD(symbol),              
+        RiskCalculator.getStockDetails(symbol),            
       ]);
 
-      // 2. Extract Data variables
+      // 2. Extract Data
       final rsi = results[0] as double;
       final bands = results[1] as Map<String, double>;
       final volRatio = results[2] as double;
@@ -122,31 +124,37 @@ class _RiskDashboardState extends State<RiskDashboard> {
       final priceData = results[7] as Map<String, double>;
       final currentPrice = priceData['price'] ?? 0.0;
 
-      // ====================================================
-      // 🔔 NOTIFICATION LOGIC (RESTORED)
-      // ====================================================
-      
-      // Step A: Ask the Risk Engine "Is this stock dangerous?"
+      // 3. Risk Engine & Notification Logic
       List<String> warnings = RiskEngine().evaluateRisk(
         symbol: symbol,
         currentPrice: currentPrice,
         sma50: sma50,
         liveATR: atr,
-        historicalATR: 3.902, // Using the fixed benchmark for now
+        historicalATR: 3.902, // The benchmark for comparison
         volumeRatio: volRatio,
       );
 
-      // Step B: If the engine returns warnings, fire the notification
+      // --- DEMO TRIGGER ---
+      bool isDemoMode = false; 
+      if (isDemoMode) {
+        warnings.add("High Risk Alert: Unusual $symbol Volatility Detected");
+      }
+
       if (warnings.isNotEmpty) {
-        // We trigger the notification using the FIRST warning in the list
-        // e.g., Title: "Risk Alert: TSLA", Body: "Volatility Spike Detected!"
         NotificationService.showNotification(
           title: "Risk Alert: $symbol",
           body: warnings.first, 
         );
-        print("--- NOTIFICATION SENT: ${warnings.first} ---");
       }
-      // ====================================================
+
+      // 4. Calculate Technical Score (Cumulative Algorithm)
+      double technicalScore = _calculateCompositeScore(
+        rsi: rsi,
+        sma50: sma50,
+        ema20: ema20,
+        currentPrice: currentPrice,
+        macdHist: macd['histogram'] ?? 0.0,
+      );
 
       if (mounted) {
         setState(() {
@@ -160,12 +168,12 @@ class _RiskDashboardState extends State<RiskDashboard> {
             'macd': macd,      
           };
           
-          _portfolioRiskScore = rsi; 
+          _portfolioRiskScore = technicalScore; 
           _isLoading = false;
         });
       }
     } catch (e) {
-      print("Error analyzing stock: $e");
+      print("Analysis Error: $e");
       if (mounted) setState(() => _isLoading = false);
     }
   }
@@ -195,11 +203,11 @@ class _RiskDashboardState extends State<RiskDashboard> {
                 ],
               ),
               const Divider(height: 30),
-              const Text("WHAT IS IT?", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey, fontSize: 12)),
+              const Text("DEFINITION", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey, fontSize: 12)),
               const SizedBox(height: 5),
               Text(definition, style: const TextStyle(fontSize: 16)),
               const SizedBox(height: 20),
-              const Text("HOW TO TRADE IT", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blueAccent, fontSize: 12)),
+              const Text("STRATEGY", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blueAccent, fontSize: 12)),
               const SizedBox(height: 5),
               Text(strategy, style: const TextStyle(fontSize: 16)),
               const SizedBox(height: 20),
@@ -207,7 +215,7 @@ class _RiskDashboardState extends State<RiskDashboard> {
                 width: double.infinity,
                 child: ElevatedButton(
                   onPressed: () => Navigator.pop(context),
-                  child: const Text("Got it!"),
+                  child: const Text("Close"),
                 ),
               )
             ],
@@ -260,8 +268,8 @@ class _RiskDashboardState extends State<RiskDashboard> {
                   _getRsiColor(_metrics['rsi']), 
                   _getRsiStatus(_metrics['rsi']),
                   "RSI Insight",
-                  "Measures the speed of price changes (The 'Greed Meter').",
-                  "• Above 70 (Red): Overbought. Be careful, price might drop.\n• Below 30 (Green): Oversold. Good chance for a bargain buy."
+                  "Relative Strength Index. Measures the speed of price changes.",
+                  "• > 70: Overbought (Potential Sell)\n• < 30: Oversold (Potential Buy)"
                 ),
 
                 // 2. BOLLINGER BANDS
@@ -275,8 +283,8 @@ class _RiskDashboardState extends State<RiskDashboard> {
                   (_metrics['volume'] ?? 0) > 1.5 ? Colors.purple : Colors.blueGrey, 
                   "Relative to 5-Day Avg",
                   "Volume Insight",
-                  "Compares today's trading activity to the average of the last 5 days.",
-                  "• High Ratio (> 2.0): Big news or big move happening.\n• Low Ratio (< 1.0): Quiet day, price moves might be fake."
+                  "Compares today's volume to the 5-day average.",
+                  "• > 2.0: High Interest (Strong Move)\n• < 1.0: Low Interest (Weak Move)"
                 ),
 
                 // 4. ATR
@@ -287,11 +295,11 @@ class _RiskDashboardState extends State<RiskDashboard> {
                   Colors.teal, 
                   "Expected Daily Move",
                   "ATR Insight",
-                  "Average True Range. Tells you how many dollars this stock moves in a day.",
-                  "• Use this for Stop Losses.\n• Example: If ATR is \$5, set your stop loss \$5 below your buy price."
+                  "Average True Range represents market volatility.",
+                  "Used for stop-loss placement. Higher ATR means higher risk."
                 ),
 
-                // 5. SMA (Simple Moving Average)
+                // 5. SMA
                 _buildMetricCard(
                   context,
                   "SMA (50-Day)",
@@ -299,11 +307,11 @@ class _RiskDashboardState extends State<RiskDashboard> {
                   Colors.blue,
                   "Long-Term Baseline",
                   "SMA Insight",
-                  "The average price over the last 50 days. It smooths out noise.",
-                  "• Price ABOVE SMA: The long-term trend is UP (Bullish).\n• Price BELOW SMA: The long-term trend is DOWN (Bearish)."
+                  "Simple Moving Average over 50 days.",
+                  "• Price > SMA: Bullish Trend\n• Price < SMA: Bearish Trend"
                 ),
 
-                // 6. EMA (Exponential Moving Average)
+                // 6. EMA
                 _buildMetricCard(
                   context,
                   "EMA (20-Day)",
@@ -311,11 +319,11 @@ class _RiskDashboardState extends State<RiskDashboard> {
                   Colors.purple,
                   "Short-Term Trend",
                   "EMA Insight",
-                  "Reacts faster to recent price changes than the SMA.",
-                  "• Watch for the 'Crossover': If the EMA crosses above the SMA, it is often a strong BUY signal (Golden Cross)."
+                  "Exponential Moving Average weighted to recent prices.",
+                  "Crossovers with SMA often signal trend reversals."
                 ),
 
-                // 7. MACD (Momentum)
+                // 7. MACD
                 _buildMacdCard(context),
 
               ],
@@ -357,8 +365,15 @@ class _RiskDashboardState extends State<RiskDashboard> {
   }
 
   Widget _buildRiskScoreCard(BuildContext context) {
-    Color color = _portfolioRiskScore > 70 ? Colors.red : (_portfolioRiskScore < 30 ? Colors.green : Colors.orange);
-    String label = _portfolioRiskScore > 70 ? "High Risk" : (_portfolioRiskScore < 30 ? "Oversold" : "Neutral");
+    // Score Logic:
+    // 0-40: Bearish (Red)
+    // 41-59: Neutral (Orange)
+    // 60-100: Bullish (Green)
+    Color color = _portfolioRiskScore >= 60 ? Colors.green 
+                : (_portfolioRiskScore <= 40 ? Colors.red : Colors.orange);
+    
+    String label = _portfolioRiskScore >= 60 ? "Bullish" 
+                 : (_portfolioRiskScore <= 40 ? "Bearish" : "Neutral");
 
     return Container(
       padding: const EdgeInsets.all(20),
@@ -375,12 +390,12 @@ class _RiskDashboardState extends State<RiskDashboard> {
             children: [
               Row(
                 children: [
-                  const Text("Technical Exposure", style: TextStyle(fontSize: 14)),
+                  const Text("Technical Score", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.grey)), 
                   GestureDetector(
                     onTap: () => _showInsight(
-                      "Technical Exposure", 
-                      "An overall summary of the stock's current state based on RSI and Momentum.", 
-                      "• High Risk (>70): The stock is expensive. Consider selling.\n• Oversold (<30): The stock is cheap. Good buying opportunity."
+                      "Algorithmic Score", 
+                      "Cumulative technical analysis score based on RSI, Trends, and Momentum.", 
+                      "• > 60: Strong Buying Signals\n• < 40: Strong Selling Signals"
                     ),
                     child: const Padding(
                       padding: EdgeInsets.only(left: 6),
@@ -389,17 +404,47 @@ class _RiskDashboardState extends State<RiskDashboard> {
                   )
                 ],
               ),
-              Text(label, style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: color)),
+              const SizedBox(height: 5),
+              Text(
+                "${_portfolioRiskScore.toInt()} / 100", 
+                style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: color)
+              ),
+              const SizedBox(height: 5),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: color,
+                  borderRadius: BorderRadius.circular(4)
+                ),
+                child: Text(
+                  label.toUpperCase(), 
+                  style: const TextStyle(fontSize: 12, color: Colors.white, fontWeight: FontWeight.bold)
+                ),
+              ),
             ],
           ),
           Stack(
             alignment: Alignment.center,
             children: [
               SizedBox(
-                width: 60, height: 60,
-                child: CircularProgressIndicator(value: _portfolioRiskScore / 100, color: color, strokeWidth: 6),
+                width: 80, height: 80,
+                child: CircularProgressIndicator(
+                  value: _portfolioRiskScore / 100, 
+                  color: color, 
+                  strokeWidth: 8,
+                  backgroundColor: color.withOpacity(0.2),
+                ),
               ),
-              Text(_portfolioRiskScore.toInt().toString(), style: TextStyle(fontWeight: FontWeight.bold, color: color)),
+              Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    _portfolioRiskScore >= 50 ? Icons.trending_up : Icons.trending_down, 
+                    color: color, 
+                    size: 28
+                  ),
+                ],
+              ),
             ],
           )
         ],
@@ -453,8 +498,8 @@ class _RiskDashboardState extends State<RiskDashboard> {
               GestureDetector(
                 onTap: () => _showInsight(
                   "Bollinger Bands", 
-                  "Elastic bands around the price. Prices hate being outside these bands.", 
-                  "• Price hits Upper Band: Overextended (Sell).\n• Price hits Lower Band: Overextended (Buy)."
+                  "A volatility indicator. Bands expand when volatility is high and contract when volatility is low.", 
+                  "• Price at Upper Band: Potential Reversal (Down)\n• Price at Lower Band: Potential Reversal (Up)"
                 ),
                 child: Padding(
                   padding: const EdgeInsets.only(left: 8),
@@ -502,8 +547,8 @@ class _RiskDashboardState extends State<RiskDashboard> {
                 GestureDetector(
                   onTap: () => _showInsight(
                     "MACD",
-                    "Moving Average Convergence Divergence. Spots reversals.",
-                    "Green Histogram = Bullish Momentum. Red = Bearish."
+                    "Trend-following momentum indicator.",
+                    "Green Histogram = Positive Momentum. Red Histogram = Negative Momentum."
                   ),
                   child: Icon(Icons.info_outline, size: 18, color: Colors.grey.shade400),
                 ),

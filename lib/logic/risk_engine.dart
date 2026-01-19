@@ -1,8 +1,6 @@
 
 
 class RiskEngine {
-  /// Analyzes stock data and returns a list of warning messages (Strings).
-  /// If the list is empty, the stock is considered "Safe".
   List<String> evaluateRisk({
     required String symbol,
     required double currentPrice,
