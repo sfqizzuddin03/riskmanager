@@ -130,7 +130,7 @@ class _RiskDashboardState extends State<RiskDashboard> {
         currentPrice: currentPrice,
         sma50: sma50,
         liveATR: atr,
-        historicalATR: 3.902, // The benchmark for comparison
+        historicalATR: 3.902, 
         volumeRatio: volRatio,
       );
 
